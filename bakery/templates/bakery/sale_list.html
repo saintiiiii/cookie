@@ -7,20 +7,43 @@
         <h3 class="section-title">Transactions</h3>
         <a href="{% url 'pos' %}" class="btn btn-primary">Open POS</a>
     </div>
+    <form class="inventory-filters mb-3" method="get">
+        <input type="text" name="search" class="form-control" placeholder="Receipt, cashier, product, barcode" value="{{ request.GET.search }}">
+        <select name="payment" class="form-select">
+            <option value="">All Payments</option>
+            {% for value, label in payment_types %}<option value="{{ value }}" {% if request.GET.payment == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="channel" class="form-select">
+            <option value="">All Channels</option>
+            {% for value, label in channel_choices %}<option value="{{ value }}" {% if request.GET.channel == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="status" class="form-select">
+            <option value="">All Status</option>
+            {% for value, label in status_choices %}<option value="{{ value }}" {% if request.GET.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="sort" class="form-select">
+            {% for value, label in sort_choices %}<option value="{{ value }}" {% if request.GET.sort == value or not request.GET.sort and value == "newest" %}selected{% endif %}>Sort: {{ label }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-outline-secondary">Filter</button>
+    </form>
     <div class="table-responsive">
         <table class="table bakery-table">
-            <thead><tr><th>Receipt</th><th>Cashier</th><th>Payment</th><th>Total</th><th>Profit</th><th>Date</th></tr></thead>
+            <thead><tr><th>Receipt</th><th>Cashier</th><th>Channel</th><th>Payment</th><th>Discount</th><th>Tax</th><th>Total</th><th>Profit</th><th>Status</th><th>Date</th></tr></thead>
             <tbody>
                 {% for sale in object_list %}
                 <tr>
                     <td><a href="{% url 'sale-receipt' sale.pk %}">{{ sale.receipt_number }}</a></td>
                     <td>{{ sale.cashier.username }}</td>
+                    <td>{{ sale.get_sale_channel_display }}</td>
                     <td>{{ sale.get_payment_type_display }}</td>
+                    <td>{{ sale.discount_amount|currency }}</td>
+                    <td>{{ sale.tax_amount|currency }}</td>
                     <td>{{ sale.total_amount|currency }}</td>
                     <td>{{ sale.total_profit|currency }}</td>
+                    <td>{% if sale.is_voided %}<span class="badge text-bg-secondary">Voided</span>{% else %}<span class="badge text-bg-success">Completed</span>{% endif %}</td>
                     <td>{{ sale.sold_at|date:"M d, Y h:i A" }}</td>
                 </tr>
-                {% empty %}<tr><td colspan="6" class="text-center text-muted">No sales yet.</td></tr>{% endfor %}
+                {% empty %}<tr><td colspan="10" class="text-center text-muted">No sales yet.</td></tr>{% endfor %}
             </tbody>
         </table>
     </div>

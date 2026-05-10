@@ -45,12 +45,13 @@
                 <thead>
                     <tr>
                         <th class="check-col"></th>
-                        <th>SKU</th>
+                        <th>SKU / Barcode</th>
                         <th>Name</th>
                         <th>Health</th>
                         <th>Category</th>
                         <th>Cost</th>
-                        <th>Available Stock</th>
+                        <th>Available</th>
+                        <th>Reserved / Sold</th>
                         <th>Status</th>
                         {% if can_manage_inventory %}<th class="text-end">Actions</th>{% endif %}
                     </tr>
@@ -66,20 +67,23 @@
                                 {% else %}
                                 <span class="inventory-thumb inventory-thumb-empty">{{ row.name|slice:":1"|upper }}</span>
                                 {% endif %}
-                                <span>{{ row.sku }}</span>
+                                <span>{{ row.sku }}<br><small>{{ row.barcode|default:row.item_id }}</small></span>
                             </div>
                         </td>
                         <td>
                             <strong>{{ row.name }}</strong>
                             <div class="tiny-muted">{{ row.supplier|default:row.kind }}</div>
                         </td>
-                        <td><span class="grade-pill {% if row.status == "Low Stock" %}grade-watch{% elif row.status == "Out of Stock" %}grade-empty{% endif %}">{% if row.status == "In Stock" %}Good{% elif row.status == "Low Stock" %}Watch{% else %}Empty{% endif %}</span></td>
-                        <td><span class="category-pill">{{ row.category }}</span></td>
+                        <td><span class="grade-pill {% if row.stock_status == "Low Stock" %}grade-watch{% elif row.stock_status == "Out of Stock" %}grade-empty{% endif %}">{% if row.stock_status == "In Stock" %}Good{% elif row.stock_status == "Low Stock" %}Watch{% else %}Empty{% endif %}</span></td>
+                        <td><span class="category-pill" style="border-color: {{ row.category_color }}; color: {{ row.category_color }}">{{ row.category }}</span></td>
                         <td>{{ row.cost_price|currency }}</td>
                         <td>{{ row.available_stock }} {{ row.unit }}</td>
+                        <td>{{ row.reserved_stock }} / {{ row.sold_stock }}</td>
                         <td>
-                            {% if row.status == "Out of Stock" %}
+                            {% if row.status == "Out of Stock" or row.status == "Expired" %}
                             <span class="badge text-bg-danger">{{ row.status }}</span>
+                            {% elif row.status == "Archived" %}
+                            <span class="badge text-bg-secondary">{{ row.status }}</span>
                             {% elif row.status == "Low Stock" %}
                             <span class="badge text-bg-warning">{{ row.status }}</span>
                             {% else %}
@@ -98,6 +102,14 @@
                                         <option value="increase">Add</option>
                                         <option value="decrease">Use</option>
                                     </select>
+                                    <select name="reason" class="form-select form-select-sm">
+                                        <option value="restock">Restock</option>
+                                        <option value="damaged">Damaged</option>
+                                        <option value="expired">Expired</option>
+                                        <option value="returned">Returned</option>
+                                        <option value="sampling">Sample</option>
+                                        <option value="staff_consumption">Staff</option>
+                                    </select>
                                     <button class="btn btn-sm btn-outline-primary"><i class="bi bi-check-lg"></i></button>
                                 </form>
                                 <a href="{% url 'product-edit' row.object.pk %}" class="icon-action" title="Edit"><i class="bi bi-pencil"></i></a>
@@ -111,6 +123,14 @@
                                         <option value="increase">Add</option>
                                         <option value="decrease">Use</option>
                                     </select>
+                                    <select name="reason" class="form-select form-select-sm">
+                                        <option value="restock">Restock</option>
+                                        <option value="damaged">Damaged</option>
+                                        <option value="expired">Expired</option>
+                                        <option value="returned">Returned</option>
+                                        <option value="sampling">Sample</option>
+                                        <option value="staff_consumption">Staff</option>
+                                    </select>
                                     <button class="btn btn-sm btn-outline-primary"><i class="bi bi-check-lg"></i></button>
                                 </form>
                                 <a href="{% url 'ingredient-edit' row.object.pk %}" class="icon-action" title="Edit"><i class="bi bi-pencil"></i></a>
@@ -121,7 +141,7 @@
                         {% endif %}
                     </tr>
                     {% empty %}
-                    <tr><td colspan="{% if can_manage_inventory %}9{% else %}8{% endif %}" class="text-center text-muted">No inventory records found.</td></tr>
+                    <tr><td colspan="{% if can_manage_inventory %}10{% else %}9{% endif %}" class="text-center text-muted">No inventory records found.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block page_title %}Form{% endblock %}
+{% block page_title %}{{ form_title|default:"Form" }}{% endblock %}
 {% block content %}
 <section class="panel-card narrow-card">
     <form method="post" enctype="multipart/form-data">
@@ -8,7 +8,22 @@
         {% for field in form %}
         <div class="mb-3">
             <label class="form-label">{{ field.label }}</label>
+            {% if field.field.widget.input_type == "password" %}
+            <div class="password-field">
+                {{ field }}
+                <button type="button" class="btn btn-outline-secondary password-toggle" data-password-toggle="{{ field.id_for_label }}">
+                    <i class="bi bi-eye"></i>
+                </button>
+            </div>
+            {% else %}
             {{ field }}
+            {% endif %}
+            {% if field.name == "password1" or field.name == "new_password1" %}
+            <div class="password-meter" data-password-meter="{{ field.id_for_label }}">
+                <span></span>
+            </div>
+            <div class="form-text password-meter-label" data-password-label="{{ field.id_for_label }}">Password strength</div>
+            {% endif %}
             {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
             {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
         </div>

@@ -5,13 +5,16 @@ A Django-based bakery management app for point-of-sale, inventory, ingredients, 
 ## Features
 
 - Role-aware dashboard for Admin, Cashier, and Inventory Staff
-- Product, ingredient, recipe, supplier, and order management
-- POS workflow with automatic product and ingredient deduction
+- Product, ingredient, recipe, supplier, employee, production batch, and order management
+- Product images, unique SKU/item ID/barcode values, supplier/date metadata, archive support, and category colors
+- POS workflow with barcode lookup, walk-in/online sale type, discounts, tax, and automatic product and ingredient deduction
+- Admin-approved sale voids with automatic stock restoration and voided-item records
 - Inventory history logs and low-stock alerts
-- Sales reporting with PDF and Excel exports
+- Activity audit trail and login history
+- Sales reporting with PDF, Excel, and CSV exports
 - Printable browser receipt and PDF receipt output
 - SQLite for development with MySQL and PostgreSQL environment support
-- Backup download for the SQLite database
+- Backup download and restore upload for the SQLite database
 
 ## Setup
 
@@ -25,9 +28,9 @@ python manage.py runserver
 
 ## Demo Accounts
 
-- `admin` / `admin1234`
-- `cashier` / `cashier1234`
-- `inventory` / `inventory1234`
+- `admin` / `Admin@123`
+- `cashier` / `Cashier@123`
+- `inventory` / `Inventory@123`
 
 ## Database Configuration
 
@@ -49,6 +52,7 @@ If `MYSQL_DB` is not set, you can still switch to PostgreSQL with:
 
 ## Notes
 
-- The seed command only creates user roles and login accounts. Products, stock items, suppliers, and transactions should be created through the app.
+- The seed command creates user roles, default employee accounts, and starter product categories. Products, stock items, suppliers, and transactions should be created through the app.
 - Uploaded product images are stored in `media/products/`.
 - The backup download route is intended for SQLite backups in development or small deployments.
+- Passwords must be at least 8 characters and include uppercase, lowercase, number, and special character, such as `Example@123`.

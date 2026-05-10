@@ -11,6 +11,10 @@
                     <h3 class="section-title">Create Sale</h3>
                     <button type="button" class="btn btn-outline-secondary" id="addPosRow">Add Item</button>
                 </div>
+                <div class="barcode-scan mb-3">
+                    <i class="bi bi-upc-scan"></i>
+                    <input type="text" id="barcodeLookup" class="form-control" placeholder="Scan or type barcode / SKU">
+                </div>
                 <div id="posRows">
                     <div class="row g-3 pos-row mb-2">
                         <div class="col-md-7">
@@ -18,7 +22,7 @@
                             <select name="product_id" class="form-select pos-product" required>
                                 <option value="">Choose product</option>
                                 {% for product in products %}
-                                <option value="{{ product.id }}" data-price="{{ product.price }}">{{ product.name }} | {{ product.stock_quantity }} in stock</option>
+                                <option value="{{ product.id }}" data-price="{{ product.price }}" data-barcode="{{ product.barcode }}" data-sku="{{ product.sku }}" data-stock="{{ product.stock_quantity }}">{{ product.name }} | {{ product.stock_quantity }} in stock | {{ product.barcode }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -37,6 +41,14 @@
             <section class="panel-card">
                 <h3 class="section-title">Checkout</h3>
                 <div class="mb-3">
+                    <label class="form-label">Sale Type</label>
+                    <select name="sale_channel" class="form-select">
+                        {% for value, label in channel_choices %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
                     <label class="form-label">Payment Type</label>
                     <select name="payment_type" class="form-select">
                         {% for value, label in payment_types %}
@@ -45,15 +57,35 @@
                     </select>
                 </div>
                 <div class="mb-3">
+                    <label class="form-label">Discount</label>
+                    <select name="discount_type" class="form-select" id="discountType">
+                        {% for value, label in discount_choices %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Promo Discount Amount</label>
+                    <input type="number" name="promo_discount_amount" id="promoDiscount" step="0.01" class="form-control" min="0" value="0">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Tax Rate</label>
+                    <input type="number" name="tax_rate" id="taxRate" step="0.0001" class="form-control" min="0" value="0.12">
+                </div>
+                <div class="mb-3">
                     <label class="form-label">Payment Amount</label>
-                    <input type="number" name="payment_amount" step="0.01" class="form-control" min="0" required>
+                    <input type="number" name="payment_amount" id="paymentAmount" step="0.01" class="form-control" min="0" required>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Notes</label>
                     <textarea name="notes" rows="3" class="form-control"></textarea>
                 </div>
                 <div class="checkout-summary">
+                    <p><span>Subtotal</span><strong id="posSubtotal">PHP 0.00</strong></p>
+                    <p><span>Discount</span><strong id="posDiscount">PHP 0.00</strong></p>
+                    <p><span>Tax</span><strong id="posTax">PHP 0.00</strong></p>
                     <p><span>Total</span><strong id="posTotal">PHP 0.00</strong></p>
+                    <p><span>Change</span><strong id="posChange">PHP 0.00</strong></p>
                 </div>
                 <button class="btn btn-primary w-100">Complete Sale</button>
             </section>
@@ -70,7 +102,7 @@ const rowTemplate = `
         <select name="product_id" class="form-select pos-product" required>
             <option value="">Choose product</option>
             {% for product in products %}
-            <option value="{{ product.id }}" data-price="{{ product.price }}">{{ product.name }} | {{ product.stock_quantity }} in stock</option>
+            <option value="{{ product.id }}" data-price="{{ product.price }}" data-barcode="{{ product.barcode }}" data-sku="{{ product.sku }}" data-stock="{{ product.stock_quantity }}">{{ product.name }} | {{ product.stock_quantity }} in stock | {{ product.barcode }}</option>
             {% endfor %}
         </select>
     </div>
@@ -84,18 +116,45 @@ const rowTemplate = `
 </div>`;
 
 const rowsContainer = document.getElementById("posRows");
+const subtotalField = document.getElementById("posSubtotal");
+const discountField = document.getElementById("posDiscount");
+const taxField = document.getElementById("posTax");
 const totalField = document.getElementById("posTotal");
+const changeField = document.getElementById("posChange");
+const discountType = document.getElementById("discountType");
+const promoDiscount = document.getElementById("promoDiscount");
+const taxRate = document.getElementById("taxRate");
+const paymentAmount = document.getElementById("paymentAmount");
+const barcodeLookup = document.getElementById("barcodeLookup");
+
+function money(value) {
+    return `PHP ${value.toFixed(2)}`;
+}
 
 function calculatePosTotal() {
-    let total = 0;
+    let subtotal = 0;
     document.querySelectorAll(".pos-row").forEach((row) => {
         const product = row.querySelector(".pos-product");
         const quantity = parseFloat(row.querySelector(".pos-quantity").value || 0);
         const selected = product.options[product.selectedIndex];
         const price = parseFloat(selected?.dataset.price || 0);
-        total += price * quantity;
+        subtotal += price * quantity;
     });
-    totalField.textContent = `PHP ${total.toFixed(2)}`;
+    let discount = 0;
+    if (discountType.value === "senior" || discountType.value === "pwd") {
+        discount = subtotal * 0.2;
+    } else if (discountType.value === "promo") {
+        discount = Math.min(parseFloat(promoDiscount.value || 0), subtotal);
+    }
+    const taxable = Math.max(subtotal - discount, 0);
+    const tax = taxable * parseFloat(taxRate.value || 0);
+    const total = taxable + tax;
+    const change = Math.max(parseFloat(paymentAmount.value || 0) - total, 0);
+    subtotalField.textContent = money(subtotal);
+    discountField.textContent = money(discount);
+    taxField.textContent = money(tax);
+    totalField.textContent = money(total);
+    changeField.textContent = money(change);
 }
 
 document.getElementById("addPosRow").addEventListener("click", () => {
@@ -103,7 +162,13 @@ document.getElementById("addPosRow").addEventListener("click", () => {
 });
 
 document.addEventListener("input", (event) => {
-    if (event.target.matches(".pos-product, .pos-quantity")) {
+    if (event.target.matches(".pos-product, .pos-quantity, #discountType, #promoDiscount, #taxRate, #paymentAmount")) {
+        calculatePosTotal();
+    }
+});
+
+document.addEventListener("change", (event) => {
+    if (event.target.matches(".pos-product, #discountType")) {
         calculatePosTotal();
     }
 });
@@ -115,6 +180,39 @@ document.addEventListener("click", (event) => {
             calculatePosTotal();
         }
     }
+});
+
+barcodeLookup.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+        return;
+    }
+    event.preventDefault();
+    const code = barcodeLookup.value.trim().toLowerCase();
+    if (!code) {
+        return;
+    }
+    let matchedValue = "";
+    document.querySelectorAll(".pos-product option").forEach((option) => {
+        if (matchedValue || !option.value) {
+            return;
+        }
+        if ((option.dataset.barcode || "").toLowerCase() === code || (option.dataset.sku || "").toLowerCase() === code) {
+            matchedValue = option.value;
+        }
+    });
+    if (!matchedValue) {
+        barcodeLookup.classList.add("is-invalid");
+        return;
+    }
+    barcodeLookup.classList.remove("is-invalid");
+    const targetRow = Array.from(document.querySelectorAll(".pos-row")).find((row) => !row.querySelector(".pos-product").value) || document.querySelector(".pos-row:last-child");
+    const productSelect = targetRow.querySelector(".pos-product");
+    const quantityInput = targetRow.querySelector(".pos-quantity");
+    const wasEmpty = !productSelect.value;
+    productSelect.value = matchedValue;
+    quantityInput.value = wasEmpty ? 1 : parseInt(quantityInput.value || "0", 10) + 1;
+    barcodeLookup.value = "";
+    calculatePosTotal();
 });
 </script>
 {% endblock %}

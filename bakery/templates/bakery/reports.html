@@ -10,16 +10,24 @@
     <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center">
         <div>
             <h3 class="section-title mb-1">Exports</h3>
-            <p class="text-muted mb-0">Download bakery sales reports in PDF or Excel.</p>
+            <p class="text-muted mb-0">Download bakery sales reports in PDF, Excel, or CSV.</p>
         </div>
         <div class="d-flex gap-2">
             <a href="{% url 'sales-pdf' %}" class="btn btn-outline-secondary">Export PDF</a>
+            <a href="{% url 'sales-csv' %}" class="btn btn-outline-secondary">Export CSV</a>
             <a href="{% url 'sales-excel' %}" class="btn btn-primary">Export Excel</a>
             {% if user.is_superuser %}
             <a href="{% url 'backup-database' %}" class="btn btn-outline-dark">Backup DB</a>
             {% endif %}
         </div>
     </div>
+    {% if user.is_superuser %}
+    <form method="post" action="{% url 'restore-database' %}" enctype="multipart/form-data" class="restore-form mt-3">
+        {% csrf_token %}
+        {{ restore_form.backup_file }}
+        <button class="btn btn-outline-danger">Restore Backup</button>
+    </form>
+    {% endif %}
 </section>
 <section class="row g-4">
     <div class="col-lg-7">
@@ -44,6 +52,26 @@
                 {% for product in product_profits %}
                 <div class="list-item"><span>{{ product.name }}</span><strong>{{ product.profit_value|default:0|currency }}</strong></div>
                 {% empty %}<p class="text-muted mb-0">No profit data yet.</p>{% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="panel-card">
+            <h3 class="section-title">Expired Products</h3>
+            <div class="list-stack">
+                {% for product in expired_products %}
+                <div class="list-item"><span>{{ product.name }}</span><strong>{{ product.expiry_date|date:"M d, Y" }}</strong></div>
+                {% empty %}<p class="text-muted mb-0">No expired products.</p>{% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="panel-card">
+            <h3 class="section-title">Voided Transactions</h3>
+            <div class="list-stack">
+                {% for sale in voided_sales %}
+                <div class="list-item"><span>{{ sale.receipt_number }}</span><strong>{{ sale.total_amount|currency }}</strong></div>
+                {% empty %}<p class="text-muted mb-0">No voided transactions.</p>{% endfor %}
             </div>
         </div>
     </div>

@@ -459,6 +459,11 @@ html[data-theme="dark"] .btn-outline-dark {
     gap: 16px;
 }
 
+.dashboard-main-stack {
+    display: grid;
+    gap: 16px;
+}
+
 .overview-grid {
     grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
 }
@@ -898,7 +903,7 @@ html[data-theme="dark"] .grade-empty {
 }
 
 .compact-stock-form .form-select {
-    width: 76px;
+    width: 92px;
 }
 
 .icon-action {
@@ -1033,6 +1038,107 @@ html[data-theme="dark"] .grade-empty {
     justify-content: space-between;
 }
 
+.product-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.product-meta-grid span {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--soft);
+    color: var(--muted);
+    padding: 8px;
+    font-size: 11px;
+}
+
+.product-meta-grid strong {
+    display: block;
+    color: var(--text);
+    font-size: 12px;
+    margin-top: 3px;
+}
+
+.archived-toggle {
+    min-height: 38px;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 7px 10px;
+    background: var(--field-bg);
+}
+
+.pagination-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.barcode-scan,
+.password-field,
+.restore-form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.barcode-scan {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--soft);
+    padding: 10px;
+}
+
+.barcode-scan i {
+    color: var(--warm);
+    font-size: 18px;
+}
+
+.password-field .form-control {
+    flex: 1;
+}
+
+.password-toggle {
+    width: 42px;
+    min-height: 38px;
+    display: inline-grid;
+    place-items: center;
+}
+
+.password-meter {
+    height: 7px;
+    border-radius: 999px;
+    background: var(--line);
+    overflow: hidden;
+    margin-top: 8px;
+}
+
+.password-meter span {
+    display: block;
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--danger);
+    transition: width 0.18s ease, background-color 0.18s ease;
+}
+
+.password-meter[data-strength="medium"] span {
+    background: var(--warning);
+}
+
+.password-meter[data-strength="strong"] span {
+    background: var(--success);
+}
+
+.restore-form .form-control {
+    max-width: 360px;
+}
+
 .auth-shell {
     min-height: 100vh;
     display: grid;
@@ -1066,6 +1172,22 @@ html[data-theme="dark"] .grade-empty {
 
 .alert {
     border-radius: 8px;
+}
+
+.modal-content {
+    color: var(--text);
+    background: var(--panel);
+    border-color: var(--line);
+    border-radius: 8px;
+}
+
+.modal-header,
+.modal-footer {
+    border-color: var(--line);
+}
+
+html[data-theme="dark"] .btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
 }
 
 @media (max-width: 1100px) {

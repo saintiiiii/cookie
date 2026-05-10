@@ -18,12 +18,50 @@
                 <option value="{{ value }}" {% if request.GET.status == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
+            <select name="sort" class="form-select">
+                {% for value, label in sort_choices %}
+                <option value="{{ value }}" {% if request.GET.sort == value or not request.GET.sort and value == "name" %}selected{% endif %}>Sort: {{ label }}</option>
+                {% endfor %}
+            </select>
+            <label class="form-check archived-toggle">
+                <input class="form-check-input" type="checkbox" name="archived" value="1" {% if request.GET.archived %}checked{% endif %}>
+                <span>Archived</span>
+            </label>
             <button class="btn btn-outline-secondary">Filter</button>
         </form>
         <div class="d-flex gap-2">
             <a href="{% url 'category-list' %}" class="btn btn-outline-secondary">Categories</a>
+            <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#categoryCreateModal">
+                <i class="bi bi-plus-lg"></i> Add Category
+            </button>
             <a href="{% url 'inventory-dashboard' %}" class="btn btn-outline-primary">Inventory</a>
             <a href="{% url 'product-add' %}" class="btn btn-primary">Add Product</a>
+        </div>
+    </div>
+    <div class="modal fade" id="categoryCreateModal" tabindex="-1" aria-labelledby="categoryCreateModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <form method="post" class="modal-content">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h2 class="modal-title fs-6" id="categoryCreateModalLabel">Create Category</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {% for error in category_form.non_field_errors %}<div class="alert alert-danger">{{ error }}</div>{% endfor %}
+                    {% for field in category_form %}
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                        {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary">Save Category</button>
+                </div>
+            </form>
         </div>
     </div>
     <div class="row g-4">
@@ -39,28 +77,42 @@
                     <div class="d-flex justify-content-between align-items-start gap-3">
                         <div>
                             <h4 class="mb-1">{{ product.name }}</h4>
-                            <p class="small text-muted mb-2">{{ product.sku }} | {{ product.category.name }}</p>
+                            <p class="small text-muted mb-1">{{ product.sku }} | {{ product.category.name }}</p>
+                            <p class="small text-muted mb-2">Barcode: {{ product.barcode|default:"-" }}</p>
                         </div>
-                        {% if product.stock_status == "Out of Stock" %}
-                        <span class="badge text-bg-danger">{{ product.stock_status }}</span>
-                        {% elif product.stock_status == "Low Stock" %}
-                        <span class="badge text-bg-warning">{{ product.stock_status }}</span>
+                        {% if product.display_status == "Expired" or product.display_status == "Out of Stock" %}
+                        <span class="badge text-bg-danger">{{ product.display_status }}</span>
+                        {% elif product.display_status == "Archived" %}
+                        <span class="badge text-bg-secondary">{{ product.display_status }}</span>
                         {% else %}
-                        <span class="badge text-bg-success">{{ product.stock_status }}</span>
+                        <span class="badge text-bg-success">{{ product.display_status }}</span>
                         {% endif %}
+                    </div>
+                    <div class="product-meta-grid mb-3">
+                        <span>Item ID <strong>{{ product.item_id|default:"-" }}</strong></span>
+                        <span>Supplier <strong>{{ product.supplier.name|default:"-" }}</strong></span>
+                        <span>Expiry <strong>{{ product.expiry_date|date:"M d, Y"|default:"-" }}</strong></span>
+                        <span>Reserved <strong>{{ product.reserved_stock }}</strong></span>
                     </div>
                     <p class="mb-1">Price: <strong>{{ product.price|currency }}</strong></p>
                     <p class="mb-1">Cost: {{ product.cost|currency }}</p>
-                    <p class="mb-3">Stock: {{ product.stock_quantity }}</p>
+                    <p class="mb-3">Stock: {{ product.stock_quantity }}{% if product.stock_status == "Low Stock" %} <span class="badge text-bg-warning">Low Stock</span>{% endif %}</p>
                     <form method="post" action="{% url 'product-restock' product.pk %}" class="d-flex gap-2 mb-3">
                         {% csrf_token %}
                         <input type="number" class="form-control" min="1" name="quantity" placeholder="Restock qty" required>
                         <input type="hidden" name="movement" value="increase">
+                        <input type="hidden" name="reason" value="restock">
                         <input type="hidden" name="note" value="Manual product restock">
                         <button class="btn btn-outline-primary">Restock</button>
                     </form>
-                    <div class="d-flex gap-2">
+                    <div class="d-flex flex-wrap gap-2">
                         <a href="{% url 'product-edit' product.pk %}" class="btn btn-outline-secondary btn-sm">Edit</a>
+                        {% if not product.is_archived %}
+                        <form method="post" action="{% url 'product-archive' product.pk %}">
+                            {% csrf_token %}
+                            <button class="btn btn-outline-warning btn-sm">Archive</button>
+                        </form>
+                        {% endif %}
                         <a href="{% url 'product-delete' product.pk %}" class="btn btn-outline-danger btn-sm">Delete</a>
                     </div>
                 </div>
@@ -70,5 +122,24 @@
         <div class="col-12"><p class="text-muted">No products yet.</p></div>
         {% endfor %}
     </div>
+    {% if is_paginated %}
+    <nav class="pagination-row" aria-label="Product pages">
+        {% if page_obj.has_previous %}<a class="btn btn-outline-secondary btn-sm" href="?page={{ page_obj.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}">Previous</a>{% endif %}
+        <span class="text-muted small">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a class="btn btn-outline-secondary btn-sm" href="?page={{ page_obj.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}">Next</a>{% endif %}
+    </nav>
+    {% endif %}
 </section>
+{% endblock %}
+{% block extra_js %}
+{% if show_category_modal %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const modal = document.getElementById("categoryCreateModal");
+    if (modal && window.bootstrap) {
+        bootstrap.Modal.getOrCreateInstance(modal).show();
+    }
+});
+</script>
+{% endif %}
 {% endblock %}

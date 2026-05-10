@@ -7,9 +7,13 @@
         <div>
             <h3 class="section-title mb-1">{{ sale.receipt_number }}</h3>
             <p class="text-muted mb-0">{{ sale.sold_at|date:"M d, Y h:i A" }}</p>
+            {% if sale.is_voided %}<span class="badge text-bg-secondary mt-2">Voided by {{ sale.voided_by.username|default:"Admin" }}</span>{% endif %}
         </div>
         <div class="d-flex gap-2">
             <a href="{% url 'sale-receipt-pdf' sale.pk %}" class="btn btn-outline-secondary">Printable PDF</a>
+            {% if can_void_sales and not sale.is_voided %}
+            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#voidSaleModal">Void</button>
+            {% endif %}
             <a href="{% url 'pos' %}" class="btn btn-primary">New Sale</a>
         </div>
     </div>
@@ -30,8 +34,56 @@
     </div>
     <div class="receipt-totals">
         <p><span>Subtotal</span><strong>{{ sale.subtotal|currency }}</strong></p>
+        <p><span>{{ sale.get_discount_type_display }}</span><strong>-{{ sale.discount_amount|currency }}</strong></p>
+        <p><span>Tax</span><strong>{{ sale.tax_amount|currency }}</strong></p>
+        <p><span>Total</span><strong>{{ sale.total_amount|currency }}</strong></p>
         <p><span>Payment</span><strong>{{ sale.payment_amount|currency }}</strong></p>
         <p><span>Change</span><strong>{{ sale.change_amount|currency }}</strong></p>
     </div>
+    {% if sale.is_voided %}
+    <div class="alert alert-warning mt-3">
+        <strong>Void reason:</strong> {{ sale.void_reason }}
+    </div>
+    {% if sale.voided_items.exists %}
+    <h3 class="section-title mt-4">Voided Items</h3>
+    <div class="table-responsive">
+        <table class="table bakery-table">
+            <thead><tr><th>Product</th><th>Qty</th><th>Total</th><th>Reason</th></tr></thead>
+            <tbody>
+                {% for item in sale.voided_items.all %}
+                <tr><td>{{ item.product.name }}</td><td>{{ item.quantity }}</td><td>{{ item.line_total|currency }}</td><td>{{ item.reason }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    {% endif %}
 </section>
+{% if can_void_sales and not sale.is_voided %}
+<div class="modal fade" id="voidSaleModal" tabindex="-1" aria-labelledby="voidSaleModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <form method="post" action="{% url 'sale-void' sale.pk %}" class="modal-content">
+            {% csrf_token %}
+            <div class="modal-header">
+                <h2 class="modal-title fs-6" id="voidSaleModalLabel">Void Transaction</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted">Admin approval will restore product and ingredient stock and keep this transaction in the audit trail.</p>
+                {% for field in void_form %}
+                <div class="mb-3">
+                    <label class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button class="btn btn-danger">Approve Void</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
 {% endblock %}

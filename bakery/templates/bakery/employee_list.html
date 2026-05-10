@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block page_title %}Employees{% endblock %}
+{% block content %}
+<section class="panel-card">
+    <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
+        <h3 class="section-title">User Management</h3>
+        <a href="{% url 'employee-add' %}" class="btn btn-primary"><i class="bi bi-person-plus"></i> Add Employee</a>
+    </div>
+    <form class="inventory-filters mb-3" method="get">
+        <input type="text" name="search" class="form-control" placeholder="Search users" value="{{ request.GET.search }}">
+        <select name="role" class="form-select">
+            <option value="">All Roles</option>
+            {% for role in roles %}<option value="{{ role }}" {% if request.GET.role == role %}selected{% endif %}>{{ role }}</option>{% endfor %}
+        </select>
+        <select name="status" class="form-select">
+            <option value="">All Status</option>
+            <option value="active" {% if request.GET.status == "active" %}selected{% endif %}>Active</option>
+            <option value="archived" {% if request.GET.status == "archived" %}selected{% endif %}>Archived</option>
+        </select>
+        <button class="btn btn-outline-secondary">Filter</button>
+    </form>
+    <div class="table-responsive">
+        <table class="table bakery-table align-middle">
+            <thead><tr><th>Username</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th></th></tr></thead>
+            <tbody>
+                {% for employee in object_list %}
+                <tr>
+                    <td>{{ employee.username }}{% if employee.is_superuser %} <span class="badge text-bg-dark">Owner</span>{% endif %}</td>
+                    <td>{{ employee.get_full_name|default:"-" }}</td>
+                    <td>{{ employee.email|default:"-" }}</td>
+                    <td>{% for group in employee.groups.all %}<span class="badge text-bg-light">{{ group.name }}</span>{% empty %}-{% endfor %}</td>
+                    <td>{% if employee.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Archived</span>{% endif %}</td>
+                    <td>{{ employee.last_login|date:"M d, Y h:i A"|default:"Never" }}</td>
+                    <td class="text-end">
+                        <a href="{% url 'employee-password-reset' employee.pk %}" class="btn btn-sm btn-outline-primary">Reset Password</a>
+                        <a href="{% url 'employee-edit' employee.pk %}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                        {% if employee.pk not in protected_user_ids %}
+                        {% if employee.is_active %}
+                        <form method="post" action="{% url 'employee-archive' employee.pk %}" class="d-inline">
+                            {% csrf_token %}
+                            <button class="btn btn-sm btn-outline-warning">Archive</button>
+                        </form>
+                        {% endif %}
+                        <a href="{% url 'employee-delete' employee.pk %}" class="btn btn-sm btn-outline-danger">Delete</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}<tr><td colspan="7" class="text-center text-muted">No users found.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

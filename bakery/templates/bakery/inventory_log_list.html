@@ -5,19 +5,21 @@
     <h3 class="section-title">Stock Movement History</h3>
     <div class="table-responsive">
         <table class="table bakery-table">
-            <thead><tr><th>When</th><th>Item</th><th>Action</th><th>Before</th><th>Change</th><th>After</th><th>By</th></tr></thead>
+            <thead><tr><th>When</th><th>Item</th><th>Action</th><th>Reason</th><th>Before</th><th>Change</th><th>After</th><th>By</th><th>Note</th></tr></thead>
             <tbody>
                 {% for log in object_list %}
                 <tr>
                     <td>{{ log.created_at|date:"M d, Y h:i A" }}</td>
                     <td>{{ log.product|default:log.ingredient }}</td>
                     <td>{{ log.get_action_display }}</td>
+                    <td>{{ log.get_reason_display|default:"-" }}</td>
                     <td>{{ log.quantity_before }}</td>
                     <td>{{ log.quantity_change }}</td>
                     <td>{{ log.quantity_after }}</td>
                     <td>{{ log.user.username|default:"System" }}</td>
+                    <td>{{ log.note|default:"-" }}</td>
                 </tr>
-                {% empty %}<tr><td colspan="7" class="text-center text-muted">No inventory logs yet.</td></tr>{% endfor %}
+                {% empty %}<tr><td colspan="9" class="text-center text-muted">No inventory logs yet.</td></tr>{% endfor %}
             </tbody>
         </table>
     </div>

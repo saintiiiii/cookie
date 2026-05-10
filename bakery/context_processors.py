@@ -15,6 +15,7 @@ def bakery_context(request):
         "sidebar_low_ingredients": Ingredient.objects.filter(quantity_in_stock__lte=F("reorder_level")).count(),
         "can_manage_inventory": can_manage_inventory,
         "can_manage_sales": can_manage_sales,
+        "can_manage_users": user_has_role(request.user, ROLE_ADMIN),
         "can_view_inventory": user_has_role(request.user, ROLE_ADMIN, ROLE_CASHIER, ROLE_INVENTORY),
         "can_view_orders": user_has_role(request.user, ROLE_ADMIN, ROLE_CASHIER, ROLE_INVENTORY),
         "can_view_reports": can_manage_inventory,

@@ -10,6 +10,17 @@
 </section>
 
 <section class="dashboard-layout">
+    <div class="dashboard-main-stack">
+    <div class="panel-card">
+        <div class="panel-topline">
+            <h3 class="section-title">Sales Trend</h3>
+            <span class="text-muted small">Last 7 days</span>
+        </div>
+        <div class="chart-shell">
+            <canvas id="salesTrendChart" height="130"></canvas>
+        </div>
+    </div>
+
     <div class="panel-card">
         <div class="panel-topline">
             <h3 class="section-title">Recent Transactions</h3>
@@ -33,12 +44,16 @@
             </table>
         </div>
     </div>
+    </div>
 
     <aside class="dashboard-side">
         <div class="panel-card">
             <div class="panel-topline">
                 <h3 class="section-title">Low Stock</h3>
                 <a href="{% url 'inventory-dashboard' %}" class="soft-link">Inventory</a>
+            </div>
+            <div class="chart-shell mb-3">
+                <canvas id="inventoryStatusChart" height="150"></canvas>
             </div>
             <div class="list-stack">
                 {% for product in low_products %}
@@ -67,4 +82,53 @@
         </div>
     </aside>
 </section>
+{% endblock %}
+{% block extra_js %}
+{{ chart_labels|json_script:"salesChartLabels" }}
+{{ chart_values|json_script:"salesChartValues" }}
+{{ inventory_chart_labels|json_script:"inventoryChartLabels" }}
+{{ inventory_chart_values|json_script:"inventoryChartValues" }}
+<script>
+const salesLabels = JSON.parse(document.getElementById("salesChartLabels").textContent);
+const salesValues = JSON.parse(document.getElementById("salesChartValues").textContent);
+const inventoryLabels = JSON.parse(document.getElementById("inventoryChartLabels").textContent);
+const inventoryValues = JSON.parse(document.getElementById("inventoryChartValues").textContent);
+
+if (window.Chart) {
+    new Chart(document.getElementById("salesTrendChart"), {
+        type: "line",
+        data: {
+            labels: salesLabels,
+            datasets: [{
+                data: salesValues,
+                borderColor: "#2f6df6",
+                backgroundColor: "rgba(47, 109, 246, 0.12)",
+                fill: true,
+                tension: 0.32
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+
+    new Chart(document.getElementById("inventoryStatusChart"), {
+        type: "doughnut",
+        data: {
+            labels: inventoryLabels,
+            datasets: [{
+                data: inventoryValues,
+                backgroundColor: ["#2fa77a", "#c48a19", "#d94f55"]
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { position: "bottom" } },
+            cutout: "62%"
+        }
+    });
+}
+</script>
 {% endblock %}

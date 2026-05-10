@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block page_title %}Audit Trail{% endblock %}
+{% block content %}
+<section class="panel-card">
+    <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
+        <h3 class="section-title">User Activity</h3>
+        <a href="{% url 'login-history' %}" class="btn btn-outline-primary">Login History</a>
+    </div>
+    <form class="inventory-filters mb-3" method="get">
+        <input type="text" name="search" class="form-control" placeholder="Search audit logs" value="{{ request.GET.search }}">
+        <select name="action" class="form-select">
+            <option value="">All Actions</option>
+            {% for value, label in action_choices %}<option value="{{ value }}" {% if request.GET.action == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-outline-secondary">Filter</button>
+    </form>
+    <div class="table-responsive">
+        <table class="table bakery-table">
+            <thead><tr><th>When</th><th>User</th><th>Action</th><th>Record</th><th>Description</th><th>IP</th></tr></thead>
+            <tbody>
+                {% for log in object_list %}
+                <tr>
+                    <td>{{ log.created_at|date:"M d, Y h:i A" }}</td>
+                    <td>{{ log.user.username|default:"System" }}</td>
+                    <td>{{ log.get_action_display }}</td>
+                    <td>{{ log.object_repr|default:log.model_name|default:"-" }}</td>
+                    <td>{{ log.description|default:"-" }}</td>
+                    <td>{{ log.ip_address|default:"-" }}</td>
+                </tr>
+                {% empty %}<tr><td colspan="6" class="text-center text-muted">No activity logs yet.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

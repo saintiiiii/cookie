@@ -1,12 +1,13 @@
 from decimal import Decimal
 from datetime import date
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.urls import reverse
 
-from .models import Category, Ingredient, IngredientPurchase, Product, Recipe, Supplier
-from .services import create_sale, reconcile_purchase_update, record_purchase, reverse_purchase_stock
+from .models import Category, Ingredient, IngredientPurchase, Product, Recipe, Sale, Supplier
+from .services import ROLE_INVENTORY, bootstrap_roles, create_sale, reconcile_purchase_update, record_purchase, reverse_purchase_stock, void_sale
 
 
 class SaleServiceTests(TestCase):
@@ -41,6 +42,27 @@ class SaleServiceTests(TestCase):
         self.assertEqual(self.product.stock_quantity, 8)
         self.assertEqual(self.flour.quantity_in_stock, Decimal("46.00"))
         self.assertEqual(sale.items.count(), 1)
+
+    def test_void_sale_restores_stock_and_records_voided_items(self):
+        sale = create_sale(
+            cashier=self.user,
+            payment_type="cash",
+            payment_amount=Decimal("1000.00"),
+            items=[{"product_id": self.product.id, "quantity": 2}],
+            notes="Test sale",
+        )
+
+        void_sale(sale=sale, approved_by=self.user, reason="Customer cancellation")
+
+        sale.refresh_from_db()
+        self.product.refresh_from_db()
+        self.flour.refresh_from_db()
+
+        self.assertEqual(sale.status, Sale.STATUS_VOIDED)
+        self.assertEqual(self.product.stock_quantity, 10)
+        self.assertEqual(self.flour.quantity_in_stock, Decimal("50.00"))
+        self.assertEqual(sale.voided_items.count(), 1)
+        self.assertEqual(sale.total_profit, Decimal("0.00"))
 
     def test_sale_rejects_when_payment_is_insufficient(self):
         with self.assertRaises(ValidationError):
@@ -140,3 +162,29 @@ class SaleServiceTests(TestCase):
 
         with self.assertRaises(ValidationError):
             reverse_purchase_stock(purchase=purchase, user=self.user)
+
+
+class ProductCategoryWorkflowTests(TestCase):
+    def setUp(self):
+        bootstrap_roles()
+        self.user = User.objects.create_user(username="inventory", password="testpass123")
+        self.user.groups.add(Group.objects.get(name=ROLE_INVENTORY))
+        self.client.force_login(self.user)
+
+    def test_product_page_creates_category_visible_in_products_and_categories(self):
+        response = self.client.post(
+            reverse("product-list"),
+            {
+                "name": "Pastries",
+                "description": "Freshly baked pastry items.",
+            },
+        )
+
+        self.assertRedirects(response, reverse("product-list"))
+        self.assertTrue(Category.objects.filter(name="Pastries").exists())
+
+        product_response = self.client.get(reverse("product-list"))
+        self.assertContains(product_response, "Pastries")
+
+        category_response = self.client.get(reverse("category-list"))
+        self.assertContains(category_response, "Pastries")

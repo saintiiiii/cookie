@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block page_title %}Login History{% endblock %}
+{% block content %}
+<section class="panel-card">
+    <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
+        <h3 class="section-title">Login History</h3>
+        <a href="{% url 'activity-logs' %}" class="btn btn-outline-primary">Activity Logs</a>
+    </div>
+    <form class="inventory-filters mb-3" method="get">
+        <input type="text" name="search" class="form-control" placeholder="Search username or IP" value="{{ request.GET.search }}">
+        <button class="btn btn-outline-secondary">Filter</button>
+    </form>
+    <div class="table-responsive">
+        <table class="table bakery-table">
+            <thead><tr><th>When</th><th>Username</th><th>Action</th><th>IP</th><th>User Agent</th></tr></thead>
+            <tbody>
+                {% for entry in object_list %}
+                <tr>
+                    <td>{{ entry.created_at|date:"M d, Y h:i A" }}</td>
+                    <td>{% if entry.username %}{{ entry.username }}{% elif entry.user %}{{ entry.user.username }}{% else %}-{% endif %}</td>
+                    <td>{{ entry.get_action_display }}</td>
+                    <td>{{ entry.ip_address|default:"-" }}</td>
+                    <td>{{ entry.user_agent|truncatechars:70|default:"-" }}</td>
+                </tr>
+                {% empty %}<tr><td colspan="5" class="text-center text-muted">No login records yet.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

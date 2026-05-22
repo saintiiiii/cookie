@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -14,6 +15,10 @@ class TimeStampedModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+def default_email_verification_expiry():
+    return timezone.now() + timedelta(hours=getattr(settings, "EMAIL_VERIFICATION_TOKEN_HOURS", 48))
 
 
 class Note(TimeStampedModel):
@@ -464,6 +469,7 @@ class ActivityLog(TimeStampedModel):
     ACTION_BACKUP = "backup"
     ACTION_RESTORE = "restore"
     ACTION_PASSWORD = "password"
+    ACTION_EMAIL = "email"
     ACTION_CHOICES = [
         (ACTION_LOGIN, "Login"),
         (ACTION_LOGOUT, "Logout"),
@@ -477,6 +483,7 @@ class ActivityLog(TimeStampedModel):
         (ACTION_BACKUP, "Backup"),
         (ACTION_RESTORE, "Restore"),
         (ACTION_PASSWORD, "Password"),
+        (ACTION_EMAIL, "Email Verification"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
@@ -517,3 +524,26 @@ class LoginHistory(TimeStampedModel):
 
     def __str__(self):
         return f"{self.username or self.user} - {self.get_action_display()}"
+
+
+class EmailVerification(TimeStampedModel):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="email_verifications")
+    email = models.EmailField()
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    activate_on_verify = models.BooleanField(default=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(default=default_email_verification_expiry)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user} - {self.email}"
+
+    @property
+    def is_verified(self):
+        return self.verified_at is not None
+
+    @property
+    def is_expired(self):
+        return timezone.now() > self.expires_at

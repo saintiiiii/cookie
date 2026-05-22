@@ -4,6 +4,10 @@ from .views import (
     ActivityLogListView,
     BakeryLoginView,
     BakeryLogoutView,
+    BakeryPasswordResetCompleteView,
+    BakeryPasswordResetConfirmView,
+    BakeryPasswordResetDoneView,
+    BakeryPasswordResetView,
     CategoryCreateView,
     CategoryDeleteView,
     CategoryListView,
@@ -60,11 +64,17 @@ from .views import (
     sales_excel_export,
     sales_pdf_export,
     void_sale_view,
+    verify_email_view,
 )
 
 urlpatterns = [
     path("login/", BakeryLoginView.as_view(), name="login"),
     path("logout/", BakeryLogoutView.as_view(), name="logout"),
+    path("password-reset/", BakeryPasswordResetView.as_view(), name="password-reset"),
+    path("password-reset/done/", BakeryPasswordResetDoneView.as_view(), name="password-reset-done"),
+    path("password-reset/<uidb64>/<token>/", BakeryPasswordResetConfirmView.as_view(), name="password-reset-confirm"),
+    path("password-reset/complete/", BakeryPasswordResetCompleteView.as_view(), name="password-reset-complete"),
+    path("verify-email/<uuid:token>/", verify_email_view, name="verify-email"),
     path("", DashboardView.as_view(), name="dashboard"),
     path("categories/", CategoryListView.as_view(), name="category-list"),
     path("categories/add/", CategoryCreateView.as_view(), name="category-add"),

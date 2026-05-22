@@ -1,10 +1,12 @@
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.contrib.auth.models import Group
+from django.conf import settings
+from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 
 from .models import ActivityLog, Category, Ingredient, IngredientPurchase, InventoryLog, Product, Sale, SaleItem, VoidedSaleItem
@@ -107,6 +109,49 @@ def create_inventory_log(
     )
 
 
+def low_stock_email_recipients():
+    configured_recipients = getattr(settings, "LOW_STOCK_EMAIL_RECIPIENTS", [])
+    if configured_recipients:
+        return configured_recipients
+    return list(
+        User.objects.filter(
+            Q(is_superuser=True) | Q(groups__name__in=[ROLE_ADMIN, ROLE_INVENTORY]),
+            is_active=True,
+        )
+        .exclude(email="")
+        .values_list("email", flat=True)
+        .distinct()
+    )
+
+
+def maybe_send_low_stock_email(*, item_name, item_type, before, after, threshold, unit="pcs"):
+    before = Decimal(before)
+    after = Decimal(after)
+    threshold = Decimal(threshold)
+    if not getattr(settings, "LOW_STOCK_EMAIL_ENABLED", False):
+        return False
+    if not (before > threshold and after <= threshold):
+        return False
+
+    recipients = low_stock_email_recipients()
+    if not recipients:
+        return False
+
+    send_mail(
+        subject=f"Low stock alert: {item_name}",
+        message=(
+            f"{item_type} '{item_name}' reached the low-stock level.\n\n"
+            f"Previous quantity: {_format_stock_quantity(before)} {unit}\n"
+            f"Current quantity: {_format_stock_quantity(after)} {unit}\n"
+            f"Low-stock threshold: {_format_stock_quantity(threshold)} {unit}\n"
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=recipients,
+        fail_silently=True,
+    )
+    return True
+
+
 def _format_stock_quantity(value):
     value = Decimal(value)
     if value == value.to_integral_value():
@@ -141,6 +186,14 @@ def adjust_product_stock(product, quantity_change, user=None, note="", action=In
         instance=product,
         description=note or f"Product stock changed by {_format_stock_quantity(quantity_change)}.",
         metadata={"before": str(before), "change": str(quantity_change), "after": str(product.stock_quantity), "reason": reason},
+    )
+    maybe_send_low_stock_email(
+        item_name=product.name,
+        item_type="Product",
+        before=before,
+        after=product.stock_quantity,
+        threshold=product.low_stock_threshold,
+        unit="pcs",
     )
     return product
 
@@ -185,6 +238,14 @@ def adjust_ingredient_stock(ingredient, quantity_change, user=None, note="", pur
         instance=ingredient,
         description=note or f"Ingredient stock changed by {_format_stock_quantity(quantity_change)}.",
         metadata={"before": str(before), "change": str(quantity_change), "after": str(ingredient.quantity_in_stock), "reason": reason},
+    )
+    maybe_send_low_stock_email(
+        item_name=ingredient.name,
+        item_type="Stock item",
+        before=before,
+        after=ingredient.quantity_in_stock,
+        threshold=ingredient.reorder_level,
+        unit=ingredient.unit,
     )
     return ingredient
 
@@ -339,6 +400,14 @@ def create_sale(
             product=product,
             sale=sale,
         )
+        maybe_send_low_stock_email(
+            item_name=product.name,
+            item_type="Product",
+            before=before,
+            after=product.stock_quantity,
+            threshold=product.low_stock_threshold,
+            unit="pcs",
+        )
 
     for ingredient_id, needed in ingredient_requirements.items():
         ingredient = ingredients[ingredient_id]
@@ -355,6 +424,14 @@ def create_sale(
             note=f"Used in {sale.receipt_number}",
             ingredient=ingredient,
             sale=sale,
+        )
+        maybe_send_low_stock_email(
+            item_name=ingredient.name,
+            item_type="Stock item",
+            before=before_ingredient,
+            after=ingredient.quantity_in_stock,
+            threshold=ingredient.reorder_level,
+            unit=ingredient.unit,
         )
     log_activity(
         user=cashier,

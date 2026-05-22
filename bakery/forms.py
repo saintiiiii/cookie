@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django import forms
-from django.contrib.auth.forms import AuthenticationForm, SetPasswordForm, UserCreationForm
+from django.contrib.auth.forms import AuthenticationForm, PasswordResetForm, SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
 
@@ -24,6 +24,10 @@ class StyledFormMixin:
 class LoginForm(StyledFormMixin, AuthenticationForm):
     username = forms.CharField(widget=forms.TextInput(attrs={"placeholder": "Username"}))
     password = forms.CharField(widget=forms.PasswordInput(attrs={"placeholder": "Password"}))
+
+
+class PasswordResetRequestForm(StyledFormMixin, PasswordResetForm):
+    email = forms.EmailField(widget=forms.EmailInput(attrs={"placeholder": "Email address"}))
 
 
 class CategoryForm(StyledFormMixin, forms.ModelForm):
@@ -319,6 +323,10 @@ class AdminPasswordResetForm(PasswordSecurityMixin, StyledFormMixin, SetPassword
 
     def clean_new_password1(self):
         return self.validate_password_format(self.cleaned_data["new_password1"])
+
+
+class SecureSetPasswordForm(AdminPasswordResetForm):
+    pass
 
 
 class VoidSaleForm(StyledFormMixin, forms.Form):

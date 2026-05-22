@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     ActivityLog,
     Category,
+    EmailVerification,
     Ingredient,
     IngredientPurchase,
     InventoryLog,
@@ -73,3 +74,10 @@ admin.site.register(InventoryLog)
 admin.site.register(ProductionBatch)
 admin.site.register(ActivityLog)
 admin.site.register(LoginHistory)
+
+
+@admin.register(EmailVerification)
+class EmailVerificationAdmin(admin.ModelAdmin):
+    list_display = ("user", "email", "verified_at", "expires_at", "activate_on_verify")
+    list_filter = ("verified_at", "expires_at", "activate_on_verify")
+    search_fields = ("user__username", "email", "token")

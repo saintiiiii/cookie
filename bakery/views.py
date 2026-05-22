@@ -8,15 +8,16 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.contrib.auth.views import LoginView, LogoutView
+from django.contrib.auth.views import LoginView, LogoutView, PasswordResetCompleteView, PasswordResetConfirmView, PasswordResetDoneView, PasswordResetView
 from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
 from django.db import connections, transaction
 from django.db.models import DecimalField, ExpressionWrapper, F, Q, Sum
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import TruncDate
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DeleteView, FormView, ListView, TemplateView, UpdateView
@@ -36,15 +37,17 @@ from .forms import (
     IngredientPurchaseForm,
     LoginForm,
     OrderForm,
+    PasswordResetRequestForm,
     ProductionBatchForm,
     ProductForm,
     RecipeForm,
     RestockIngredientForm,
     RestockProductForm,
+    SecureSetPasswordForm,
     SupplierForm,
     VoidSaleForm,
 )
-from .models import ActivityLog, Category, Ingredient, IngredientPurchase, InventoryLog, LoginHistory, Order, Product, ProductionBatch, Recipe, Sale, Supplier
+from .models import ActivityLog, Category, EmailVerification, Ingredient, IngredientPurchase, InventoryLog, LoginHistory, Order, Product, ProductionBatch, Recipe, Sale, Supplier
 from .permissions import RoleRequiredMixin, user_has_role
 from .services import (
     ROLE_ADMIN,
@@ -134,6 +137,110 @@ class BakeryLogoutView(LogoutView):
     pass
 
 
+class BakeryPasswordResetView(PasswordResetView):
+    template_name = "bakery/password_reset_form.html"
+    email_template_name = "bakery/password_reset_email.txt"
+    subject_template_name = "bakery/password_reset_subject.txt"
+    form_class = PasswordResetRequestForm
+    success_url = reverse_lazy("password-reset-done")
+
+
+class BakeryPasswordResetDoneView(PasswordResetDoneView):
+    template_name = "bakery/password_reset_done.html"
+
+
+class BakeryPasswordResetConfirmView(PasswordResetConfirmView):
+    template_name = "bakery/password_reset_confirm.html"
+    form_class = SecureSetPasswordForm
+    success_url = reverse_lazy("password-reset-complete")
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        log_activity(
+            user=self.user,
+            action=ActivityLog.ACTION_PASSWORD,
+            instance=self.user,
+            description="Password reset completed from email link.",
+            ip_address=client_ip(self.request),
+        )
+        return response
+
+
+class BakeryPasswordResetCompleteView(PasswordResetCompleteView):
+    template_name = "bakery/password_reset_complete.html"
+
+
+def send_employee_verification_email(request, user):
+    email = (user.email or "").strip()
+    if not email:
+        return None
+
+    user.email_verifications.filter(verified_at__isnull=True).update(expires_at=timezone.now())
+    activate_on_verify = user.is_active
+    if activate_on_verify:
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+
+    verification = EmailVerification.objects.create(
+        user=user,
+        email=email,
+        activate_on_verify=activate_on_verify,
+    )
+    verify_url = request.build_absolute_uri(reverse("verify-email", args=[verification.token]))
+    send_mail(
+        subject="Verify your Sweet Crumbs Bakery account",
+        message=(
+            f"Hi {user.get_username()},\n\n"
+            "Please verify your email address to activate your Sweet Crumbs Bakery account:\n"
+            f"{verify_url}\n\n"
+            f"This link expires on {timezone.localtime(verification.expires_at).strftime('%Y-%m-%d %I:%M %p')}."
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[email],
+        fail_silently=True,
+    )
+    log_activity(
+        user=request.user,
+        action=ActivityLog.ACTION_EMAIL,
+        instance=user,
+        description=f"Sent email verification to {email}.",
+        ip_address=client_ip(request),
+    )
+    return verification
+
+
+def verify_email_view(request, token):
+    verification = EmailVerification.objects.select_related("user").filter(token=token).first()
+    if not verification:
+        messages.error(request, "Verification link is invalid.")
+        return redirect("login")
+    if verification.is_verified:
+        messages.info(request, "This email address is already verified.")
+        return redirect("login")
+    if verification.is_expired:
+        messages.error(request, "Verification link has expired. Ask an admin to resend verification.")
+        return redirect("login")
+
+    verification.verified_at = timezone.now()
+    verification.save(update_fields=["verified_at", "updated_at"])
+
+    user = verification.user
+    user.email = verification.email
+    if verification.activate_on_verify:
+        user.is_active = True
+    user.save(update_fields=["email", "is_active"])
+
+    log_activity(
+        user=user,
+        action=ActivityLog.ACTION_EMAIL,
+        instance=user,
+        description=f"Verified email address {verification.email}.",
+        ip_address=client_ip(request),
+    )
+    messages.success(request, "Email verified. You can sign in now.")
+    return redirect("login")
+
+
 class DashboardView(RoleRequiredMixin, TemplateView):
     template_name = "bakery/dashboard.html"
     allowed_roles = (ROLE_ADMIN, ROLE_CASHIER, ROLE_INVENTORY)
@@ -141,26 +248,42 @@ class DashboardView(RoleRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         today = timezone.localdate()
+        trend_start = today - timedelta(days=6)
+        trend_days = [trend_start + timedelta(days=offset) for offset in range(7)]
         month_start = today.replace(day=1)
         sales_today = Sale.objects.filter(sold_at__date=today, status=Sale.STATUS_COMPLETED)
         sales_month = Sale.objects.filter(sold_at__date__gte=month_start, status=Sale.STATUS_COMPLETED)
 
-        top_products = (
+        top_products = list(
             Product.objects.filter(sale_items__sale__status=Sale.STATUS_COMPLETED)
             .annotate(total_sold=Sum("sale_items__quantity", filter=Q(sale_items__sale__status=Sale.STATUS_COMPLETED)))
             .order_by("-total_sold", "name")[:5]
         )
         recent_transactions = Sale.objects.select_related("cashier").prefetch_related("items__product")[:6]
-        low_products = Product.objects.filter(stock_quantity__lte=F("low_stock_threshold"), is_active=True).order_by("stock_quantity")[:6]
-        low_ingredients = Ingredient.objects.filter(quantity_in_stock__lte=F("reorder_level")).order_by("quantity_in_stock")[:6]
+        low_products_queryset = Product.objects.filter(stock_quantity__lte=F("low_stock_threshold"), is_active=True).order_by("stock_quantity")
+        low_ingredients_queryset = Ingredient.objects.filter(quantity_in_stock__lte=F("reorder_level")).order_by("quantity_in_stock")
+        low_products = low_products_queryset[:6]
+        low_ingredients = low_ingredients_queryset[:6]
         active_products = Product.objects.filter(is_archived=False)
         sales_series = (
-            Sale.objects.filter(sold_at__date__gte=today - timedelta(days=6), status=Sale.STATUS_COMPLETED)
+            Sale.objects.filter(sold_at__date__gte=trend_start, status=Sale.STATUS_COMPLETED)
             .annotate(day=TruncDate("sold_at"))
             .values("day")
             .annotate(total=Sum("total_amount"))
             .order_by("day")
         )
+        sales_by_day = {entry["day"]: entry["total"] or Decimal("0.00") for entry in sales_series}
+        inventory_series = (
+            InventoryLog.objects.filter(created_at__date__gte=trend_start)
+            .annotate(day=TruncDate("created_at"))
+            .values("day")
+            .annotate(
+                stock_in=Sum("quantity_change", filter=Q(quantity_change__gt=0)),
+                stock_out=Sum("quantity_change", filter=Q(quantity_change__lt=0)),
+            )
+            .order_by("day")
+        )
+        inventory_by_day = {entry["day"]: entry for entry in inventory_series}
 
         context.update(
             {
@@ -170,9 +293,22 @@ class DashboardView(RoleRequiredMixin, TemplateView):
                 "top_products": top_products,
                 "low_products": low_products,
                 "low_ingredients": low_ingredients,
-                "low_stock_count": low_products.count() + low_ingredients.count(),
-                "chart_labels": [entry["day"].strftime("%b %d") for entry in sales_series],
-                "chart_values": [float(entry["total"]) for entry in sales_series],
+                "low_product_count": low_products_queryset.count(),
+                "low_ingredient_count": low_ingredients_queryset.count(),
+                "low_stock_count": low_products_queryset.count() + low_ingredients_queryset.count(),
+                "chart_labels": [day.strftime("%b %d") for day in trend_days],
+                "chart_values": [float(sales_by_day.get(day, Decimal("0.00"))) for day in trend_days],
+                "inventory_movement_labels": [day.strftime("%b %d") for day in trend_days],
+                "inventory_stock_in_values": [
+                    float(inventory_by_day.get(day, {}).get("stock_in") or Decimal("0.00"))
+                    for day in trend_days
+                ],
+                "inventory_stock_out_values": [
+                    abs(float(inventory_by_day.get(day, {}).get("stock_out") or Decimal("0.00")))
+                    for day in trend_days
+                ],
+                "top_product_chart_labels": [product.name for product in top_products],
+                "top_product_chart_values": [int(product.total_sold or 0) for product in top_products],
                 "inventory_chart_labels": ["In Stock", "Low Stock", "Out of Stock"],
                 "inventory_chart_values": [
                     filter_products_by_status(active_products, "in").count(),
@@ -830,6 +966,7 @@ class EmployeeCreateView(RoleRequiredMixin, CreateView):
 
     def form_valid(self, form):
         response = super().form_valid(form)
+        verification = send_employee_verification_email(self.request, self.object)
         log_activity(
             user=self.request.user,
             action=ActivityLog.ACTION_CREATE,
@@ -837,7 +974,10 @@ class EmployeeCreateView(RoleRequiredMixin, CreateView):
             description=f"Created employee account {self.object.username}.",
             ip_address=client_ip(self.request),
         )
-        messages.success(self.request, "Employee account created.")
+        if verification:
+            messages.success(self.request, f"Employee account created. Verification email sent to {verification.email}.")
+        else:
+            messages.success(self.request, "Employee account created.")
         return response
 
 
@@ -853,10 +993,14 @@ class EmployeeUpdateView(RoleRequiredMixin, UpdateView):
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
+        previous_email = self.object.email
         if is_owner_account(self.object) and not form.cleaned_data.get("is_active", True):
             form.add_error("is_active", "The main owner/admin account cannot be archived.")
             return self.form_invalid(form)
         response = super().form_valid(form)
+        verification = None
+        if self.object.email and self.object.email != previous_email:
+            verification = send_employee_verification_email(self.request, self.object)
         log_activity(
             user=self.request.user,
             action=ActivityLog.ACTION_UPDATE,
@@ -864,7 +1008,10 @@ class EmployeeUpdateView(RoleRequiredMixin, UpdateView):
             description=f"Updated employee account {self.object.username}.",
             ip_address=client_ip(self.request),
         )
-        messages.success(self.request, "Employee account updated.")
+        if verification:
+            messages.success(self.request, f"Employee account updated. Verification email sent to {verification.email}.")
+        else:
+            messages.success(self.request, "Employee account updated.")
         return response
 
 

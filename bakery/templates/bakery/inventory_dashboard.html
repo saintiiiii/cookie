@@ -40,6 +40,13 @@
             <button class="btn btn-outline-secondary">Search</button>
         </form>
 
+        {% if stock_issues %}
+        <div class="inventory-warning">
+            <i class="bi bi-exclamation-triangle"></i>
+            {{ stock_issues }} item{{ stock_issues|pluralize }} need stock attention.
+        </div>
+        {% endif %}
+
         <div class="table-responsive">
             <table class="table bakery-table inventory-table align-middle">
                 <thead>

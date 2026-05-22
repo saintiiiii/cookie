@@ -11,6 +11,9 @@ A Django-based bakery management app for point-of-sale, inventory, ingredients, 
 - Admin-approved sale voids with automatic stock restoration and voided-item records
 - Inventory history logs and low-stock alerts
 - Activity audit trail and login history
+- Forgot-password email flow and employee email verification
+- Password hashing, password complexity checks, session timeout, and role-based permissions
+- Optional low-stock email notifications
 - Sales reporting with PDF, Excel, and CSV exports
 - Printable browser receipt and PDF receipt output
 - SQLite for development with MySQL and PostgreSQL environment support
@@ -49,6 +52,24 @@ If `MYSQL_DB` is not set, you can still switch to PostgreSQL with:
 - `POSTGRES_PASSWORD`
 - `POSTGRES_HOST`
 - `POSTGRES_PORT`
+
+## Email Configuration
+
+By default, emails are written to the console during development. Set these environment variables to send real email:
+
+- `DJANGO_EMAIL_BACKEND`
+- `DJANGO_EMAIL_HOST`
+- `DJANGO_EMAIL_PORT`
+- `DJANGO_EMAIL_HOST_USER`
+- `DJANGO_EMAIL_HOST_PASSWORD`
+- `DJANGO_EMAIL_USE_TLS`
+- `DJANGO_DEFAULT_FROM_EMAIL`
+- `EMAIL_VERIFICATION_TOKEN_HOURS`
+
+To enable low-stock email alerts, set:
+
+- `LOW_STOCK_EMAIL_ENABLED=True`
+- `LOW_STOCK_EMAIL_RECIPIENTS=owner@example.com,inventory@example.com`
 
 ## Notes
 

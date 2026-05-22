@@ -2,11 +2,13 @@ from decimal import Decimal
 from datetime import date
 
 from django.contrib.auth.models import Group, User
+from django.core import mail
 from django.core.exceptions import ValidationError
+from django.test import override_settings
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Category, Ingredient, IngredientPurchase, Product, Recipe, Sale, Supplier
+from .models import Category, EmailVerification, Ingredient, IngredientPurchase, Product, Recipe, Sale, Supplier
 from .services import ROLE_INVENTORY, bootstrap_roles, create_sale, reconcile_purchase_update, record_purchase, reverse_purchase_stock, void_sale
 
 
@@ -116,6 +118,27 @@ class SaleServiceTests(TestCase):
         self.flour.refresh_from_db()
         self.assertEqual(self.flour.quantity_in_stock, Decimal("50.00"))
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        LOW_STOCK_EMAIL_ENABLED=True,
+        LOW_STOCK_EMAIL_RECIPIENTS=["stock@example.com"],
+    )
+    def test_sale_crossing_low_stock_threshold_sends_email_alert(self):
+        self.product.stock_quantity = 11
+        self.product.low_stock_threshold = 10
+        self.product.save(update_fields=["stock_quantity", "low_stock_threshold"])
+
+        create_sale(
+            cashier=self.user,
+            payment_type="cash",
+            payment_amount=Decimal("500.00"),
+            items=[{"product_id": self.product.id, "quantity": 1}],
+        )
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Low stock alert", mail.outbox[0].subject)
+        self.assertIn(self.product.name, mail.outbox[0].body)
+
     def test_record_purchase_updates_stock_and_metadata(self):
         purchase = IngredientPurchase.objects.create(
             supplier=self.supplier,
@@ -188,3 +211,48 @@ class ProductCategoryWorkflowTests(TestCase):
 
         category_response = self.client.get(reverse("category-list"))
         self.assertContains(category_response, "Pastries")
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class EmployeeVerificationTests(TestCase):
+    def setUp(self):
+        bootstrap_roles()
+        self.admin = User.objects.create_superuser(
+            username="admin",
+            email="owner@example.com",
+            password="Admin@123",
+        )
+        self.client.force_login(self.admin)
+
+    def test_employee_creation_hashes_password_and_requires_email_verification(self):
+        response = self.client.post(
+            reverse("employee-add"),
+            {
+                "username": "newcashier",
+                "first_name": "New",
+                "last_name": "Cashier",
+                "email": "newcashier@example.com",
+                "role": "Cashier",
+                "is_active": "on",
+                "password1": "OvenShift#789",
+                "password2": "OvenShift#789",
+            },
+        )
+
+        self.assertRedirects(response, reverse("employee-list"))
+        employee = User.objects.get(username="newcashier")
+        self.assertFalse(employee.is_active)
+        self.assertNotEqual(employee.password, "OvenShift#789")
+        self.assertTrue(employee.check_password("OvenShift#789"))
+
+        verification = EmailVerification.objects.get(user=employee)
+        self.assertEqual(verification.email, "newcashier@example.com")
+        self.assertEqual(len(mail.outbox), 1)
+
+        verify_response = self.client.get(reverse("verify-email", args=[verification.token]))
+        self.assertRedirects(verify_response, reverse("login"))
+
+        employee.refresh_from_db()
+        verification.refresh_from_db()
+        self.assertTrue(employee.is_active)
+        self.assertIsNotNone(verification.verified_at)

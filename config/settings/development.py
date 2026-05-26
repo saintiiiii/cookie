@@ -1,0 +1,13 @@
+from .base import *  # noqa: F403
+
+DEBUG = True
+SECRET_KEY = require_secret_key(debug=True)  # noqa: F405
+
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+SECURE_SSL_REDIRECT = False
+SECURE_HSTS_SECONDS = 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
+SECURE_BROWSER_XSS_FILTER = True
+AXES_ENABLED = False

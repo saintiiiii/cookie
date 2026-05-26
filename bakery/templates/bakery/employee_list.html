@@ -50,4 +50,34 @@
         </table>
     </div>
 </section>
+
+{% if temporary_password_popup %}
+<div class="modal fade" id="temporaryPasswordModal" tabindex="-1" aria-labelledby="temporaryPasswordModalLabel" aria-hidden="true" data-show-temporary-password="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content temporary-password-modal">
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title fs-5" id="temporaryPasswordModalLabel">Temporary Password</h2>
+                    <p class="text-muted mb-0 small">{{ temporary_password_popup.username }} must change this after logging in.</p>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label" for="temporaryPasswordValue">Password</label>
+                <div class="temporary-password-copy">
+                    <input id="temporaryPasswordValue" class="form-control" type="text" value="{{ temporary_password_popup.password }}" readonly>
+                    <button class="btn btn-primary" type="button" data-copy-target="temporaryPasswordValue">
+                        <i class="bi bi-clipboard"></i>
+                        <span>Copy</span>
+                    </button>
+                </div>
+                <div class="form-text" data-copy-status="temporaryPasswordValue">Copy this now. It will not be shown again.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Done</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}

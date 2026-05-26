@@ -1,10 +1,14 @@
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm, PasswordResetForm, SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import Group, User
+from django.core.mail import send_mail
 from django.core.exceptions import ValidationError
+from django.template import loader
+from django.utils import timezone
 
-from .models import Category, InventoryLog, Order, Product, ProductionBatch, Supplier
-from .services import ROLE_ADMIN, ROLE_CASHIER, ROLE_INVENTORY, generate_product_barcode, generate_product_sku
+from bakery.models import ActivityLog, Category, EmployeeSecurity, InventoryLog, Order, Product, ProductionBatch, Supplier
+from bakery.services import ROLE_ADMIN, ROLE_CASHIER, ROLE_INVENTORY, generate_product_barcode, generate_product_sku, generate_temporary_password, log_activity
+from bakery.utils.http import client_ip
 
 
 class StyledFormMixin:
@@ -26,6 +30,48 @@ class LoginForm(StyledFormMixin, AuthenticationForm):
 
 class PasswordResetRequestForm(StyledFormMixin, PasswordResetForm):
     email = forms.EmailField(widget=forms.EmailInput(attrs={"placeholder": "Email address"}))
+
+    def save(
+        self,
+        domain_override=None,
+        subject_template_name="registration/password_reset_subject.txt",
+        email_template_name="registration/password_reset_email.html",
+        use_https=False,
+        token_generator=None,
+        from_email=None,
+        request=None,
+        html_email_template_name=None,
+        extra_email_context=None,
+    ):
+        email = self.cleaned_data["email"]
+        for user in self.get_users(email):
+            temporary_password = generate_temporary_password()
+            user.set_password(temporary_password)
+            user.save(update_fields=["password"])
+            EmployeeSecurity.objects.update_or_create(
+                user=user,
+                defaults={
+                    "must_change_password": True,
+                    "temporary_password_created_at": timezone.now(),
+                    "temporary_password_set_by": None,
+                },
+            )
+            context = {
+                "email": user.email,
+                "user": user,
+                "temporary_password": temporary_password,
+                **(extra_email_context or {}),
+            }
+            subject = loader.render_to_string(subject_template_name, context)
+            subject = "".join(subject.splitlines())
+            body = loader.render_to_string(email_template_name, context)
+            send_mail(subject, body, from_email, [user.email])
+            log_activity(
+                action=ActivityLog.ACTION_PASSWORD,
+                instance=user,
+                description="Generated temporary password from forgot-password email request.",
+                ip_address=client_ip(request),
+            )
 
 
 class CategoryForm(StyledFormMixin, forms.ModelForm):
@@ -280,20 +326,12 @@ class SecureSetPasswordForm(AdminPasswordResetForm):
     pass
 
 
+class TemporaryPasswordResetForm(StyledFormMixin, forms.Form):
+    confirm = forms.BooleanField(
+        label="Generate a temporary password and require a password change on next login",
+        required=True,
+    )
+
+
 class VoidSaleForm(StyledFormMixin, forms.Form):
     reason = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), min_length=5)
-
-
-class BackupRestoreForm(StyledFormMixin, forms.Form):
-    backup_file = forms.FileField(help_text="Upload a SQLite .sqlite3 or .db backup created by this app.")
-
-    def clean_backup_file(self):
-        backup_file = self.cleaned_data["backup_file"]
-        name = backup_file.name.lower()
-        if not (name.endswith(".sqlite3") or name.endswith(".db")):
-            raise ValidationError("Upload a SQLite backup file.")
-        header = backup_file.read(16)
-        backup_file.seek(0)
-        if header != b"SQLite format 3\x00":
-            raise ValidationError("The uploaded file is not a valid SQLite database.")
-        return backup_file

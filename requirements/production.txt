@@ -1,0 +1,3 @@
+-r base.txt
+psycopg[binary]==3.3.3
+mysql-connector-python==9.6.0

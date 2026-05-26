@@ -1,0 +1,15 @@
+from . import (
+    CategoryCreateView,
+    CategoryDeleteView,
+    CategoryListView,
+    CategoryUpdateView,
+    ProductCreateView,
+    ProductDeleteView,
+    ProductListView,
+    ProductUpdateView,
+    SupplierCreateView,
+    SupplierDeleteView,
+    SupplierListView,
+    SupplierUpdateView,
+    archive_product_view,
+)

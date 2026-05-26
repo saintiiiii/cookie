@@ -28,34 +28,34 @@
             <div class="brand-mark"><i class="bi bi-basket2-fill"></i></div>
         </div>
         <nav class="side-nav" aria-label="Main navigation">
-            <a class="side-link {% if current == 'dashboard' %}side-link-active{% endif %}" href="{% url 'dashboard' %}" title="Overview"><i class="bi bi-speedometer2"></i></a>
+            <a class="side-link {% if current == 'dashboard' %}side-link-active{% endif %}" href="{% url 'dashboard' %}" title="Overview" aria-label="Overview"><i class="bi bi-speedometer2"></i></a>
             {% if can_manage_sales %}
-            <a class="side-link {% if current == 'pos' %}side-link-active{% endif %}" href="{% url 'pos' %}" title="POS"><i class="bi bi-calculator"></i></a>
-            <a class="side-link {% if current == 'sale-list' or current == 'sale-receipt' %}side-link-active{% endif %}" href="{% url 'sale-list' %}" title="Sales"><i class="bi bi-receipt"></i></a>
+            <a class="side-link {% if current == 'pos' %}side-link-active{% endif %}" href="{% url 'pos' %}" title="POS" aria-label="POS"><i class="bi bi-calculator"></i></a>
+            <a class="side-link {% if current == 'sale-list' or current == 'sale-receipt' %}side-link-active{% endif %}" href="{% url 'sale-list' %}" title="Sales" aria-label="Sales"><i class="bi bi-receipt"></i></a>
             {% endif %}
             {% if can_view_inventory %}
-            <a class="side-link {% if current == 'inventory-dashboard' %}side-link-active{% endif %}" href="{% url 'inventory-dashboard' %}" title="Inventory"><i class="bi bi-box-seam"></i></a>
+            <a class="side-link {% if current == 'inventory-dashboard' %}side-link-active{% endif %}" href="{% url 'inventory-dashboard' %}" title="Inventory" aria-label="Inventory"><i class="bi bi-box-seam"></i></a>
             {% endif %}
             {% if can_manage_inventory %}
-            <a class="side-link {% if current == 'product-list' or current == 'product-add' or current == 'product-edit' %}side-link-active{% endif %}" href="{% url 'product-list' %}" title="Products"><i class="bi bi-grid"></i></a>
-            <a class="side-link {% if current == 'production-batch-list' %}side-link-active{% endif %}" href="{% url 'production-batch-list' %}" title="Production"><i class="bi bi-journal-check"></i></a>
+            <a class="side-link {% if current == 'product-list' or current == 'product-add' or current == 'product-edit' %}side-link-active{% endif %}" href="{% url 'product-list' %}" title="Products" aria-label="Products"><i class="bi bi-grid"></i></a>
+            <a class="side-link {% if current == 'production-batch-list' %}side-link-active{% endif %}" href="{% url 'production-batch-list' %}" title="Production" aria-label="Production"><i class="bi bi-journal-check"></i></a>
             {% endif %}
             {% if can_view_orders %}
-            <a class="side-link {% if current == 'order-list' %}side-link-active{% endif %}" href="{% url 'order-list' %}" title="Orders"><i class="bi bi-bag-check"></i></a>
+            <a class="side-link {% if current == 'order-list' %}side-link-active{% endif %}" href="{% url 'order-list' %}" title="Orders" aria-label="Orders"><i class="bi bi-bag-check"></i></a>
             {% endif %}
             {% if can_view_reports %}
-            <a class="side-link {% if current == 'reports' %}side-link-active{% endif %}" href="{% url 'reports' %}" title="Reports"><i class="bi bi-bar-chart"></i></a>
-            <a class="side-link {% if current == 'inventory-logs' %}side-link-active{% endif %}" href="{% url 'inventory-logs' %}" title="Logs"><i class="bi bi-clock-history"></i></a>
+            <a class="side-link {% if current == 'reports' %}side-link-active{% endif %}" href="{% url 'reports' %}" title="Reports" aria-label="Reports"><i class="bi bi-bar-chart"></i></a>
+            <a class="side-link {% if current == 'inventory-logs' %}side-link-active{% endif %}" href="{% url 'inventory-logs' %}" title="Logs" aria-label="Logs"><i class="bi bi-clock-history"></i></a>
             {% endif %}
             {% if can_manage_users %}
-            <a class="side-link {% if current == 'employee-list' %}side-link-active{% endif %}" href="{% url 'employee-list' %}" title="Employees"><i class="bi bi-people"></i></a>
-            <a class="side-link {% if current == 'activity-logs' or current == 'login-history' %}side-link-active{% endif %}" href="{% url 'activity-logs' %}" title="Audit Trail"><i class="bi bi-shield-check"></i></a>
+            <a class="side-link {% if current == 'employee-list' %}side-link-active{% endif %}" href="{% url 'employee-list' %}" title="Employees" aria-label="Employees"><i class="bi bi-people"></i></a>
+            <a class="side-link {% if current == 'activity-logs' or current == 'login-history' %}side-link-active{% endif %}" href="{% url 'activity-logs' %}" title="Audit Trail" aria-label="Audit Trail"><i class="bi bi-shield-check"></i></a>
             {% endif %}
         </nav>
         <div class="sidebar-bottom">
             <form method="post" action="{% url 'logout' %}">
                 {% csrf_token %}
-                <button class="side-link side-button" type="submit" title="Logout"><i class="bi bi-box-arrow-right"></i></button>
+                <button class="side-link side-button" type="submit" title="Logout" aria-label="Logout"><i class="bi bi-box-arrow-right"></i></button>
             </form>
         </div>
     </aside>
@@ -81,7 +81,7 @@
         {% if messages %}
         <div class="mb-4">
             {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} mb-2">{{ message }}</div>
+            <div class="alert alert-{{ message.tags }} mb-2" role="alert">{{ message }}</div>
             {% endfor %}
         </div>
         {% endif %}
@@ -95,7 +95,7 @@
     {% if messages %}
     <div class="auth-messages">
         {% for message in messages %}
-        <div class="alert alert-{{ message.tags }} mb-2">{{ message }}</div>
+        <div class="alert alert-{{ message.tags }} mb-2" role="alert">{{ message }}</div>
         {% endfor %}
     </div>
     {% endif %}

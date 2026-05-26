@@ -1,0 +1,15 @@
+from . import (
+    BakeryLoginView,
+    BakeryLogoutView,
+    BakeryPasswordResetCompleteView,
+    BakeryPasswordResetConfirmView,
+    BakeryPasswordResetDoneView,
+    BakeryPasswordResetView,
+    EmployeeCreateView,
+    EmployeeDeleteView,
+    EmployeeListView,
+    EmployeePasswordResetView,
+    EmployeeUpdateView,
+    ForcePasswordChangeView,
+    archive_employee_view,
+)

@@ -21,13 +21,6 @@
             {% endif %}
         </div>
     </div>
-    {% if user.is_superuser %}
-    <form method="post" action="{% url 'restore-database' %}" enctype="multipart/form-data" class="restore-form mt-3">
-        {% csrf_token %}
-        {{ restore_form.backup_file }}
-        <button class="btn btn-outline-danger">Restore Backup</button>
-    </form>
-    {% endif %}
 </section>
 <section class="row g-4">
     <div class="col-lg-7">

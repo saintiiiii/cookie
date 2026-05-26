@@ -2,6 +2,7 @@ import uuid
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import F, Sum
@@ -74,9 +75,30 @@ class Product(TimeStampedModel):
     product_image = models.ImageField(upload_to="products/", blank=True, null=True)
     is_active = models.BooleanField(default=True)
     is_archived = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    archived_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="archived_products",
+    )
 
     class Meta:
         ordering = ["name"]
+        indexes = [
+            models.Index(fields=["is_active", "is_archived"], name="product_active_archive_idx"),
+            models.Index(fields=["expiry_date"], name="product_expiry_idx"),
+            models.Index(fields=["stock_quantity"], name="product_stock_idx"),
+            models.Index(fields=["category", "is_active"], name="product_category_active_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(price__gte=0), name="product_price_non_negative"),
+            models.CheckConstraint(condition=models.Q(cost__gte=0), name="product_cost_non_negative"),
+            models.CheckConstraint(condition=models.Q(stock_quantity__gte=0), name="product_stock_non_negative"),
+            models.CheckConstraint(condition=models.Q(low_stock_threshold__gte=0), name="product_low_stock_non_negative"),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.sku})"
@@ -96,6 +118,21 @@ class Product(TimeStampedModel):
         if not self.theme_color and self.category_id:
             self.theme_color = self.category.color
         super().save(*args, **kwargs)
+
+    def archive(self, *, user=None):
+        self.is_archived = True
+        self.is_active = False
+        self.is_deleted = True
+        self.archived_at = timezone.now()
+        self.archived_by = user if getattr(user, "is_authenticated", False) else None
+        self.save(update_fields=["is_archived", "is_active", "is_deleted", "archived_at", "archived_by", "updated_at"])
+
+    def clean(self):
+        super().clean()
+        if self.production_date and self.expiry_date and self.expiry_date < self.production_date:
+            raise ValidationError({"expiry_date": "Expiry date cannot be earlier than production date."})
+        if self.is_archived and self.is_active:
+            raise ValidationError({"is_active": "Archived products cannot remain active."})
 
     @property
     def profit_per_unit(self):
@@ -215,6 +252,47 @@ class Sale(TimeStampedModel):
 
     class Meta:
         ordering = ["-sold_at", "-id"]
+        indexes = [
+            models.Index(fields=["sold_at"], name="sale_sold_at_idx"),
+            models.Index(fields=["status", "sold_at"], name="sale_status_sold_idx"),
+            models.Index(fields=["payment_type", "sold_at"], name="sale_payment_sold_idx"),
+            models.Index(fields=["sale_channel", "sold_at"], name="sale_channel_sold_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(subtotal__gte=0), name="sale_subtotal_non_negative"),
+            models.CheckConstraint(condition=models.Q(discount_amount__gte=0), name="sale_discount_non_negative"),
+            models.CheckConstraint(condition=models.Q(tax_rate__gte=0, tax_rate__lte=1), name="sale_tax_rate_valid"),
+            models.CheckConstraint(condition=models.Q(tax_amount__gte=0), name="sale_tax_non_negative"),
+            models.CheckConstraint(condition=models.Q(total_amount__gte=0), name="sale_total_non_negative"),
+            models.CheckConstraint(condition=models.Q(payment_amount__gte=0), name="sale_payment_non_negative"),
+            models.CheckConstraint(condition=models.Q(change_amount__gte=0), name="sale_change_non_negative"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(payment_type="cash")
+                    | models.Q(payment_type="gcash")
+                    | models.Q(payment_type="maya")
+                    | models.Q(payment_type="card")
+                ),
+                name="sale_payment_type_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(sale_channel="walk_in") | models.Q(sale_channel="online"),
+                name="sale_channel_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(discount_type="none")
+                    | models.Q(discount_type="senior")
+                    | models.Q(discount_type="pwd")
+                    | models.Q(discount_type="promo")
+                ),
+                name="sale_discount_type_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status="completed") | models.Q(status="voided"),
+                name="sale_status_valid",
+            ),
+        ]
 
     def __str__(self):
         return self.receipt_number
@@ -237,6 +315,23 @@ class Sale(TimeStampedModel):
     def is_voided(self):
         return self.status == self.STATUS_VOIDED
 
+    def clean(self):
+        super().clean()
+        choice_checks = {
+            "payment_type": (self.payment_type, self.PAYMENT_CHOICES),
+            "sale_channel": (self.sale_channel, self.CHANNEL_CHOICES),
+            "discount_type": (self.discount_type, self.DISCOUNT_CHOICES),
+            "status": (self.status, self.STATUS_CHOICES),
+        }
+        errors = {}
+        for field_name, (value, choices) in choice_checks.items():
+            if value not in {choice_value for choice_value, _label in choices}:
+                errors[field_name] = "Select a valid choice."
+        if self.tax_rate is not None and (self.tax_rate < 0 or self.tax_rate > Decimal("1.0000")):
+            errors["tax_rate"] = "Tax rate must be between 0 and 1."
+        if errors:
+            raise ValidationError(errors)
+
 
 class SaleItem(models.Model):
     sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name="items")
@@ -245,6 +340,14 @@ class SaleItem(models.Model):
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     unit_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(quantity__gte=1), name="saleitem_quantity_positive"),
+            models.CheckConstraint(condition=models.Q(unit_price__gte=0), name="saleitem_unit_price_non_negative"),
+            models.CheckConstraint(condition=models.Q(unit_cost__gte=0), name="saleitem_unit_cost_non_negative"),
+            models.CheckConstraint(condition=models.Q(line_total__gte=0), name="saleitem_line_total_non_negative"),
+        ]
 
     def __str__(self):
         return f"{self.product.name} x {self.quantity}"
@@ -260,6 +363,11 @@ class VoidedSaleItem(TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(quantity__gte=1), name="voided_saleitem_quantity_positive"),
+            models.CheckConstraint(condition=models.Q(unit_price__gte=0), name="voided_saleitem_unit_price_non_negative"),
+            models.CheckConstraint(condition=models.Q(line_total__gte=0), name="voided_saleitem_line_total_non_negative"),
+        ]
 
     def __str__(self):
         return f"Voided {self.product.name} x {self.quantity}"
@@ -270,12 +378,21 @@ class Order(TimeStampedModel):
     STATUS_IN_PROGRESS = "in_progress"
     STATUS_COMPLETED = "completed"
     STATUS_CLAIMED = "claimed"
+    STATUS_CANCELLED = "cancelled"
     STATUS_CHOICES = [
         (STATUS_PENDING, "Pending"),
         (STATUS_IN_PROGRESS, "In Progress"),
         (STATUS_COMPLETED, "Completed"),
         (STATUS_CLAIMED, "Claimed"),
+        (STATUS_CANCELLED, "Cancelled"),
     ]
+    ALLOWED_STATUS_TRANSITIONS = {
+        STATUS_PENDING: {STATUS_PENDING, STATUS_IN_PROGRESS, STATUS_CANCELLED},
+        STATUS_IN_PROGRESS: {STATUS_IN_PROGRESS, STATUS_COMPLETED, STATUS_CANCELLED},
+        STATUS_COMPLETED: {STATUS_COMPLETED, STATUS_CLAIMED, STATUS_CANCELLED},
+        STATUS_CLAIMED: {STATUS_CLAIMED},
+        STATUS_CANCELLED: {STATUS_CANCELLED},
+    }
 
     customer_name = models.CharField(max_length=150)
     contact = models.CharField(max_length=100)
@@ -289,9 +406,29 @@ class Order(TimeStampedModel):
 
     class Meta:
         ordering = ["pickup_date", "customer_name"]
+        indexes = [
+            models.Index(fields=["status", "pickup_date"], name="order_status_pickup_idx"),
+            models.Index(fields=["product", "status"], name="order_product_status_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(quantity__gte=1), name="order_quantity_positive"),
+            models.CheckConstraint(condition=models.Q(estimated_total__gte=0), name="order_estimated_total_non_negative"),
+            models.CheckConstraint(condition=models.Q(pickup_date__gte=F("order_date")), name="order_pickup_not_before_order"),
+        ]
 
     def __str__(self):
         return f"{self.customer_name} - {self.pickup_date}"
+
+    def clean(self):
+        super().clean()
+        if self.pickup_date and self.order_date and self.pickup_date < self.order_date:
+            raise ValidationError({"pickup_date": "Pickup date cannot be earlier than order date."})
+        if self.product and (not self.product.is_active or self.product.is_archived or self.product.is_deleted):
+            raise ValidationError({"product": "Unavailable or archived products cannot be ordered."})
+        if self.pk:
+            previous_status = type(self).objects.filter(pk=self.pk).values_list("status", flat=True).first()
+            if previous_status and self.status not in self.ALLOWED_STATUS_TRANSITIONS.get(previous_status, {previous_status}):
+                raise ValidationError({"status": f"Cannot change order status from {previous_status} to {self.status}."})
 
 
 class InventoryLog(TimeStampedModel):
@@ -337,9 +474,22 @@ class InventoryLog(TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["product", "created_at"], name="inventory_product_created_idx"),
+            models.Index(fields=["action", "created_at"], name="inventory_action_created_idx"),
+            models.Index(fields=["sale", "created_at"], name="inventory_sale_created_idx"),
+        ]
 
     def __str__(self):
         return f"{self.product or 'Inventory'} - {self.action}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Inventory logs are append-only and cannot be edited.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Inventory logs are append-only and cannot be deleted.")
 
 
 class ProductionBatch(TimeStampedModel):
@@ -355,14 +505,50 @@ class ProductionBatch(TimeStampedModel):
     class Meta:
         ordering = ["-production_date", "-created_at"]
         unique_together = ("product", "batch_number")
+        indexes = [
+            models.Index(fields=["product", "expiry_date", "production_date"], name="batch_fifo_idx"),
+            models.Index(fields=["product", "quantity_remaining"], name="batch_product_remaining_idx"),
+            models.Index(fields=["expiry_date"], name="batch_expiry_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(quantity_produced__gte=1), name="batch_quantity_produced_positive"),
+            models.CheckConstraint(condition=models.Q(quantity_remaining__gte=0), name="batch_quantity_remaining_non_negative"),
+            models.CheckConstraint(condition=models.Q(quantity_remaining__lte=F("quantity_produced")), name="batch_remaining_not_over_produced"),
+        ]
 
     def __str__(self):
         return f"{self.product.name} batch {self.batch_number}"
 
     def save(self, *args, **kwargs):
-        if not self.quantity_remaining:
+        if self._state.adding and not self.quantity_remaining:
             self.quantity_remaining = self.quantity_produced
         super().save(*args, **kwargs)
+
+    def clean(self):
+        super().clean()
+        if self.expiry_date and self.production_date and self.expiry_date < self.production_date:
+            raise ValidationError({"expiry_date": "Expiry date cannot be earlier than production date."})
+        if self.product and (self.product.is_archived or self.product.is_deleted):
+            raise ValidationError({"product": "Production batches cannot be added to archived products."})
+        if self.quantity_remaining and self.quantity_produced and self.quantity_remaining > self.quantity_produced:
+            raise ValidationError({"quantity_remaining": "Remaining quantity cannot exceed produced quantity."})
+
+
+class BatchAllocation(TimeStampedModel):
+    sale_item = models.ForeignKey(SaleItem, on_delete=models.CASCADE, related_name="batch_allocations")
+    batch = models.ForeignKey(ProductionBatch, on_delete=models.PROTECT, related_name="sale_allocations")
+    quantity = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    restored_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["batch", "created_at"], name="allocation_batch_created_idx"),
+            models.Index(fields=["sale_item", "batch"], name="allocation_item_batch_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(quantity__gte=1), name="allocation_quantity_positive"),
+        ]
 
 
 class ActivityLog(TimeStampedModel):
@@ -404,9 +590,22 @@ class ActivityLog(TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["action", "created_at"], name="activity_action_created_idx"),
+            models.Index(fields=["user", "created_at"], name="activity_user_created_idx"),
+            models.Index(fields=["model_name", "object_id"], name="activity_object_idx"),
+        ]
 
     def __str__(self):
         return f"{self.get_action_display()} - {self.object_repr or self.model_name or 'System'}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Activity logs are append-only and cannot be edited.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Activity logs are append-only and cannot be deleted.")
 
 
 class LoginHistory(TimeStampedModel):
@@ -428,6 +627,38 @@ class LoginHistory(TimeStampedModel):
     class Meta:
         ordering = ["-created_at"]
         verbose_name_plural = "login histories"
+        indexes = [
+            models.Index(fields=["action", "created_at"], name="login_action_created_idx"),
+            models.Index(fields=["user", "created_at"], name="login_user_created_idx"),
+            models.Index(fields=["username", "created_at"], name="login_username_created_idx"),
+        ]
 
     def __str__(self):
         return f"{self.username or self.user} - {self.get_action_display()}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Login history records are append-only and cannot be edited.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Login history records are append-only and cannot be deleted.")
+
+
+class EmployeeSecurity(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="security")
+    must_change_password = models.BooleanField(default=False)
+    temporary_password_created_at = models.DateTimeField(null=True, blank=True)
+    temporary_password_set_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="temporary_passwords_set",
+    )
+
+    class Meta:
+        verbose_name_plural = "employee security settings"
+
+    def __str__(self):
+        return f"{self.user} security"

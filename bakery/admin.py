@@ -2,7 +2,9 @@ from django.contrib import admin
 
 from .models import (
     ActivityLog,
+    BatchAllocation,
     Category,
+    EmployeeSecurity,
     InventoryLog,
     LoginHistory,
     Order,
@@ -28,6 +30,13 @@ class SaleItemInline(admin.TabularInline):
     readonly_fields = ("product", "quantity", "unit_price", "line_total")
 
 
+class BatchAllocationInline(admin.TabularInline):
+    model = BatchAllocation
+    extra = 0
+    readonly_fields = ("batch", "quantity", "restored_at")
+    can_delete = False
+
+
 class VoidedSaleItemInline(admin.TabularInline):
     model = VoidedSaleItem
     extra = 0
@@ -46,7 +55,47 @@ admin.site.register(Category)
 admin.site.register(Order)
 admin.site.register(Supplier)
 
-admin.site.register(InventoryLog)
+@admin.register(InventoryLog)
+class InventoryLogAdmin(admin.ModelAdmin):
+    list_display = ("product", "action", "quantity_change", "quantity_after", "user", "created_at")
+    readonly_fields = [field.name for field in InventoryLog._meta.fields]
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ActivityLog)
+class ActivityLogAdmin(admin.ModelAdmin):
+    list_display = ("action", "model_name", "object_repr", "user", "created_at")
+    readonly_fields = [field.name for field in ActivityLog._meta.fields]
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(LoginHistory)
+class LoginHistoryAdmin(admin.ModelAdmin):
+    list_display = ("username", "action", "ip_address", "created_at")
+    readonly_fields = [field.name for field in LoginHistory._meta.fields]
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(EmployeeSecurity)
+class EmployeeSecurityAdmin(admin.ModelAdmin):
+    list_display = ("user", "must_change_password", "temporary_password_created_at", "temporary_password_set_by")
+    readonly_fields = ("created_at", "updated_at")
+
+
 admin.site.register(ProductionBatch)
-admin.site.register(ActivityLog)
-admin.site.register(LoginHistory)
+admin.site.register(BatchAllocation)

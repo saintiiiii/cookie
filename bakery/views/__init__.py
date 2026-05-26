@@ -1,20 +1,20 @@
 import csv
-import shutil
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.auth.views import LoginView, LogoutView, PasswordResetCompleteView, PasswordResetConfirmView, PasswordResetDoneView, PasswordResetView
 from django.core.exceptions import ValidationError
-from django.db import connections, transaction
+from django.db import transaction
 from django.db.models import DecimalField, ExpressionWrapper, F, Q, Sum
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import TruncDate
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseGone
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
@@ -26,9 +26,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-from .forms import (
-    AdminPasswordResetForm,
-    BackupRestoreForm,
+from bakery.forms import (
     CategoryForm,
     EmployeeCreateForm,
     EmployeeUpdateForm,
@@ -40,11 +38,12 @@ from .forms import (
     RestockProductForm,
     SecureSetPasswordForm,
     SupplierForm,
+    TemporaryPasswordResetForm,
     VoidSaleForm,
 )
-from .models import ActivityLog, Category, InventoryLog, LoginHistory, Order, Product, ProductionBatch, Sale, Supplier
-from .permissions import RoleRequiredMixin, user_has_role
-from .services import (
+from bakery.models import ActivityLog, Category, EmployeeSecurity, InventoryLog, LoginHistory, Order, Product, ProductionBatch, Sale, Supplier
+from bakery.permissions import RoleRequiredMixin, user_has_role
+from bakery.services import (
     ROLE_ADMIN,
     ROLE_CASHIER,
     ROLE_INVENTORY,
@@ -52,38 +51,14 @@ from .services import (
     bootstrap_default_categories,
     bootstrap_roles,
     create_sale,
+    generate_temporary_password,
     log_activity,
+    increase_product_balance_for_batch,
     void_sale,
 )
-
-
-STOCK_STATUS_CHOICES = [
-    ("in", "In Stock"),
-    ("low", "Low Stock"),
-    ("out", "Out of Stock"),
-]
-
-PRODUCT_SORT_CHOICES = [
-    ("name", "Name"),
-    ("newest", "Newest"),
-    ("oldest", "Oldest"),
-    ("stock_low", "Lowest Stock"),
-    ("stock_high", "Highest Stock"),
-]
-
-SALE_SORT_CHOICES = [
-    ("newest", "Newest"),
-    ("oldest", "Oldest"),
-    ("total_high", "Highest Total"),
-    ("total_low", "Lowest Total"),
-]
-
-
-def client_ip(request):
-    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR")
+from bakery.selectors.products import PRODUCT_SORT_CHOICES, STOCK_STATUS_CHOICES, filter_products_by_status
+from bakery.selectors.sales import SALE_SORT_CHOICES
+from bakery.utils.http import client_ip
 
 
 def is_owner_account(user):
@@ -117,16 +92,6 @@ def would_remove_last_admin_access(user, *, role, is_active):
     return not will_have_admin_access and active_admin_access_count() <= 1
 
 
-def filter_products_by_status(queryset, status):
-    if status == "in":
-        return queryset.filter(stock_quantity__gt=F("low_stock_threshold"))
-    if status == "low":
-        return queryset.filter(stock_quantity__gt=0, stock_quantity__lte=F("low_stock_threshold"))
-    if status == "out":
-        return queryset.filter(stock_quantity=0)
-    return queryset
-
-
 class BakeryLoginView(LoginView):
     template_name = "bakery/login.html"
     authentication_form = LoginForm
@@ -135,6 +100,12 @@ class BakeryLoginView(LoginView):
         bootstrap_roles()
         bootstrap_default_categories()
         return super().dispatch(request, *args, **kwargs)
+
+    def get_success_url(self):
+        security, _created = EmployeeSecurity.objects.get_or_create(user=self.request.user)
+        if security.must_change_password:
+            return reverse_lazy("force-password-change")
+        return super().get_success_url()
 
 
 class BakeryLogoutView(LogoutView):
@@ -160,6 +131,14 @@ class BakeryPasswordResetConfirmView(PasswordResetConfirmView):
 
     def form_valid(self, form):
         response = super().form_valid(form)
+        EmployeeSecurity.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "must_change_password": False,
+                "temporary_password_created_at": None,
+                "temporary_password_set_by": None,
+            },
+        )
         log_activity(
             user=self.user,
             action=ActivityLog.ACTION_PASSWORD,
@@ -172,6 +151,43 @@ class BakeryPasswordResetConfirmView(PasswordResetConfirmView):
 
 class BakeryPasswordResetCompleteView(PasswordResetCompleteView):
     template_name = "bakery/password_reset_complete.html"
+
+
+class ForcePasswordChangeView(FormView):
+    template_name = "bakery/force_password_change.html"
+    form_class = SecureSetPasswordForm
+    success_url = reverse_lazy("dashboard")
+
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect("login")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        user = form.save()
+        EmployeeSecurity.objects.update_or_create(
+            user=user,
+            defaults={
+                "must_change_password": False,
+                "temporary_password_created_at": None,
+                "temporary_password_set_by": None,
+            },
+        )
+        update_session_auth_hash(self.request, user)
+        log_activity(
+            user=user,
+            action=ActivityLog.ACTION_PASSWORD,
+            instance=user,
+            description="Password changed after temporary password login.",
+            ip_address=client_ip(self.request),
+        )
+        messages.success(self.request, "Password updated. You can continue.")
+        return super().form_valid(form)
 
 
 class DashboardView(RoleRequiredMixin, TemplateView):
@@ -420,9 +436,7 @@ class ProductDeleteView(BaseDeleteView):
         try:
             return super().post(request, *args, **kwargs)
         except ProtectedError:
-            self.object.is_archived = True
-            self.object.is_active = False
-            self.object.save(update_fields=["is_archived", "is_active", "updated_at"])
+            self.object.archive(user=request.user)
             log_activity(
                 user=request.user,
                 action=ActivityLog.ACTION_ARCHIVE,
@@ -440,9 +454,7 @@ def archive_product_view(request, pk):
     if not user_has_role(request.user, ROLE_ADMIN, ROLE_INVENTORY):
         return redirect("dashboard")
     product = get_object_or_404(Product, pk=pk)
-    product.is_archived = True
-    product.is_active = False
-    product.save(update_fields=["is_archived", "is_active", "updated_at"])
+    product.archive(user=request.user)
     log_activity(
         user=request.user,
         action=ActivityLog.ACTION_ARCHIVE,
@@ -598,12 +610,11 @@ class ProductionBatchCreateView(BaseCreateView):
                 self.object = form.save(commit=False)
                 self.object.recorded_by = self.request.user
                 self.object.save()
-                adjust_product_stock(
+                increase_product_balance_for_batch(
                     self.object.product,
                     self.object.quantity_produced,
                     self.request.user,
                     f"Production batch {self.object.batch_number}",
-                    InventoryLog.ACTION_RESTOCK,
                     reason=InventoryLog.REASON_RESTOCK,
                 )
                 log_activity(
@@ -711,6 +722,7 @@ class EmployeeListView(RoleRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["roles"] = [ROLE_ADMIN, ROLE_CASHIER, ROLE_INVENTORY]
+        context["temporary_password_popup"] = self.request.session.pop("temporary_password_popup", None)
         protected_user_ids = set(User.objects.filter(is_superuser=True).values_list("pk", flat=True))
         if active_admin_access_count() <= 1:
             protected_admin = (
@@ -828,7 +840,7 @@ def archive_employee_view(request, pk):
 
 class EmployeePasswordResetView(RoleRequiredMixin, FormView):
     template_name = "bakery/employee_form.html"
-    form_class = AdminPasswordResetForm
+    form_class = TemporaryPasswordResetForm
     success_url = reverse_lazy("employee-list")
     allowed_roles = (ROLE_ADMIN,)
 
@@ -836,26 +848,35 @@ class EmployeePasswordResetView(RoleRequiredMixin, FormView):
         self.employee = get_object_or_404(User, pk=kwargs["pk"])
         return super().dispatch(request, *args, **kwargs)
 
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs["user"] = self.employee
-        return kwargs
-
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["form_title"] = f"Reset password for {self.employee.username}"
+        context["form_title"] = f"Generate temporary password for {self.employee.username}"
         return context
 
     def form_valid(self, form):
-        form.save()
+        temporary_password = generate_temporary_password()
+        self.employee.set_password(temporary_password)
+        self.employee.save(update_fields=["password"])
+        EmployeeSecurity.objects.update_or_create(
+            user=self.employee,
+            defaults={
+                "must_change_password": True,
+                "temporary_password_created_at": timezone.now(),
+                "temporary_password_set_by": self.request.user,
+            },
+        )
         log_activity(
             user=self.request.user,
             action=ActivityLog.ACTION_PASSWORD,
             instance=self.employee,
-            description=f"Reset password for {self.employee.username}.",
+            description=f"Generated temporary password for {self.employee.username}.",
             ip_address=client_ip(self.request),
         )
-        messages.success(self.request, "Employee password reset.")
+        self.request.session["temporary_password_popup"] = {
+            "username": self.employee.username,
+            "password": temporary_password,
+        }
+        messages.success(self.request, f"Temporary password generated for {self.employee.username}.")
         return super().form_valid(form)
 
 
@@ -922,9 +943,35 @@ def pos_view(request):
     if not user_has_role(request.user, ROLE_ADMIN, ROLE_CASHIER):
         return redirect("dashboard")
     products = Product.objects.filter(is_active=True, is_archived=False).select_related("category").order_by("category__name", "name")
+    products_payload = [
+        {
+            "id": product.id,
+            "name": product.name,
+            "price": str(product.price),
+            "barcode": product.barcode,
+            "sku": product.sku,
+            "stock": product.stock_quantity,
+        }
+        for product in products
+    ]
+    pos_form_values = {
+        "sale_channel": request.POST.get("sale_channel", Sale.CHANNEL_WALK_IN),
+        "payment_type": request.POST.get("payment_type", Sale.PAYMENT_CASH),
+        "discount_type": request.POST.get("discount_type", Sale.DISCOUNT_NONE),
+        "promo_discount_amount": request.POST.get("promo_discount_amount", "0"),
+        "tax_rate": request.POST.get("tax_rate", "0.12"),
+        "payment_amount": request.POST.get("payment_amount", ""),
+        "notes": request.POST.get("notes", ""),
+    }
+    initial_items = []
     if request.method == "POST":
         product_ids = request.POST.getlist("product_id")
         quantities = request.POST.getlist("quantity")
+        initial_items = [
+            {"product_id": product_id, "quantity": quantity}
+            for product_id, quantity in zip(product_ids, quantities)
+            if product_id or quantity
+        ]
         items = [{"product_id": product_id, "quantity": quantity} for product_id, quantity in zip(product_ids, quantities) if product_id and quantity]
         try:
             sale = create_sale(
@@ -942,11 +989,16 @@ def pos_view(request):
             return redirect("sale-receipt", pk=sale.pk)
         except ValidationError as exc:
             messages.error(request, "; ".join(exc.messages))
+    if not initial_items:
+        initial_items = [{"product_id": "", "quantity": 1}]
     return render(
         request,
         "bakery/pos.html",
         {
             "products": products,
+            "products_payload": products_payload,
+            "initial_items": initial_items,
+            "pos_form_values": pos_form_values,
             "payment_types": Sale.PAYMENT_CHOICES,
             "channel_choices": Sale.CHANNEL_CHOICES,
             "discount_choices": Sale.DISCOUNT_CHOICES,
@@ -1030,7 +1082,6 @@ class ReportsView(RoleRequiredMixin, TemplateView):
                 "low_products": Product.objects.filter(stock_quantity__lte=F("low_stock_threshold")),
                 "expired_products": Product.objects.filter(expiry_date__lt=timezone.localdate(), is_archived=False),
                 "voided_sales": Sale.objects.filter(status=Sale.STATUS_VOIDED)[:8],
-                "restore_form": BackupRestoreForm(),
             }
         )
         return context
@@ -1135,13 +1186,17 @@ def sales_csv_export(request):
     return response
 
 
+def sqlite_backup_tools_enabled():
+    return settings.DEBUG and settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3"
+
+
 @login_required
 def backup_database_view(request):
     if not user_has_role(request.user, ROLE_ADMIN):
         return redirect("dashboard")
 
-    if settings.DATABASES["default"]["ENGINE"] != "django.db.backends.sqlite3":
-        messages.warning(request, "Database backup download is only available for SQLite in this build.")
+    if not sqlite_backup_tools_enabled():
+        messages.warning(request, "Database backup download is only available for local SQLite development.")
         return redirect("reports")
     db_path = settings.DATABASES["default"]["NAME"]
     with open(db_path, "rb") as file_handle:
@@ -1161,30 +1216,13 @@ def backup_database_view(request):
 def restore_database_view(request):
     if not user_has_role(request.user, ROLE_ADMIN):
         return redirect("dashboard")
-    if settings.DATABASES["default"]["ENGINE"] != "django.db.backends.sqlite3":
-        messages.warning(request, "Database restore upload is only available for SQLite in this build.")
-        return redirect("reports")
-    form = BackupRestoreForm(request.POST, request.FILES)
-    if not form.is_valid():
-        messages.error(request, "Could not restore backup. Please upload a valid SQLite backup file.")
-        return redirect("reports")
-
-    db_path = settings.DATABASES["default"]["NAME"]
-    uploaded = form.cleaned_data["backup_file"]
-    current_backup_path = settings.BASE_DIR / f"db-before-restore-{timezone.now().strftime('%Y%m%d%H%M%S')}.sqlite3"
-    connections.close_all()
-    shutil.copy2(db_path, current_backup_path)
-    with open(db_path, "wb") as destination:
-        for chunk in uploaded.chunks():
-            destination.write(chunk)
     log_activity(
         user=request.user,
         action=ActivityLog.ACTION_RESTORE,
-        description=f"Restored SQLite database from uploaded backup. Previous copy: {current_backup_path.name}",
+        description="Blocked direct SQLite restore upload attempt.",
         ip_address=client_ip(request),
     )
-    messages.success(request, f"Database restored. Previous database was saved as {current_backup_path.name}.")
-    return redirect("reports")
+    return HttpResponseGone("Direct database restore uploads are disabled. Use the controlled maintenance restore process.")
 
 
 @login_required
